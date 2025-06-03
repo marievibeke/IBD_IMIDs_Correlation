@@ -1,1 +1,5 @@
-#The code used for preparing, analyzing and visualizing results based on GWAS summary statistics
+#The code used for preparing, and analyzing results based on GWAS summary statistics
+
+#GWAS summary statistics were downloaded and homogenized
+#We calculated genetic correlation across diseases
+#Code for visualizing can be found in the Microbiota folder ()
