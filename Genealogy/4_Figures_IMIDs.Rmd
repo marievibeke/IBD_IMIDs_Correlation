@@ -1,0 +1,311 @@
+---
+title: "Untitled"
+output: html_document
+date: "2024-02-23"
+editor_options: 
+  chunk_output_type: console
+---
+
+Read in packages:
+```{r}
+library(dplyr)
+library(ggplot2)
+library(ggpubr)
+library(polycor)
+library(ggdendro)
+library(lubridate)
+library( grid )
+library( forestploter )
+library(tidyverse)
+
+predict_col <- c("#4F2641", "#EAE4E3", "#FEF2FA", "#FADBC4", "#FFEAD7", "#FEF5ED",  "#C2C6B5",  "#F7FBED", "#F8F9F3", "#898A87", "#000000", "#E0E1DC", "#FFFFFF")
+accent_col <- c("#CD68AB", "#85416E", "#FF906D", "#FFC498", "#A5BC64", "#B1CD64","#E0F3A6")
+
+hc_col <- accent_col[6]
+cd1_col <- accent_col[1]
+cd2_col <- accent_col[2]
+uc1_col <- accent_col[4]
+uc2_col <- accent_col[3]
+
+path_project <- "/ngc/projects2/predict_r/research/projects/0015_Genealogy_across_diseases" 
+path_registers <- "/ngc/projects2/predict_r/research/data/sds_registers/2022-09"
+```
+
+
+## Heritability plot
+```{r}
+#Heritability over time:
+heri_time <- read.csv(paste0(path_project, "/Output/Heritability_20_years_IMIDs.txt"), sep=";", header=T)
+heri_time <- heri_time %>% mutate(Disease = toupper(Disease))
+
+#Heritability of the full cohort:
+heri <- read.csv(paste0(path_project, "/Output/Heritability_FS_IMIDs.txt"), sep=";", header=T)
+heri_time <- rbind(heri_time, heri %>% mutate(Period=5)%>%select(colnames(heri_time)))
+
+f1 <- ggplot(heri_time %>% filter(Disease %in%c("CD", "UC")&Period>1) %>% mutate(Period=as.character(Period)))+
+  geom_point(aes(x=Period, y=h2, color=Disease, size=n),position=position_dodge(width=0.3))+
+  geom_errorbar(aes(x=Period, ymin=CI1, ymax=CI2, color=Disease), width=0.5, position=position_dodge(width=0.3))+
+  theme_classic()+
+  theme(text = element_text(family="sans", size=8), axis.title = element_text(family="sans", size=8), axis.text = element_text(family="sans", size=8))+
+  labs(y=expression("Familial h"^2), x="")+
+  scale_x_discrete(labels=c("1"="1930-\n1950", "2"="1950-\n1970", "3"="1970-\n1990", "4"="1990-\n2010", "5"="Overall"))
+
+#For the overall plot, we do not want IBD or diseases not qualified for the overall H2:
+f2 <- ggplot(heri_time %>% filter(!(Disease %in%c("CD", "UC","PSC", "BD", "TA", "PG", "MG", "PBC"))&n>200) %>% mutate(Period=as.character(Period)))+
+  geom_line(aes(x=Period, y=h2, color=Disease, group=Disease))+
+  geom_point(aes(x=Period, y=h2, color=Disease, size=n))+
+  theme_classic()+
+  theme(text = element_text(family="sans", size=8), axis.title = element_text(family="sans", size=8), axis.text = element_text(family="sans", size=8))+
+  labs(y=expression("Familial h"^2), x="")+
+  scale_x_discrete(labels=c("1"="1930-\n1950", "2"="1950-\n1970", "3"="1970-\n1990", "4"="1990-\n2010", "5"="Overall"))+
+  guides(color="none")
+
+#Heritability plot
+heri$test <- "Familial"
+#Only select those with >3000 cases
+heri <- heri %>% filter(!(Disease %in% c("PSC", "BD", "TA", "PG", "MG", "PBC")))
+
+#Read in SNP h2:
+snp_heri <- read.csv(paste0(path_project, "/Generated_Data/SNP_results/SNP_h2_estimated_IMID.txt"), sep="\t", header=T)
+snp_heri <- snp_heri %>% mutate(CI1=h2-1.96*SE, CI2=h2+1.96*SE)
+snp_heri$test <- "SNP"
+snp_heri <- snp_heri %>% select(-SE)
+#Only select those with >3000 cases (delete Sar, GD, NO, MG, Iri, SS, AS, PSC, CeD)
+snp_heri <- snp_heri %>% filter(!(Disease %in% c("Sar", "GD", "NO", "MG", "Iri", "SS", "AS", "PSC", "CeD")))
+
+heri_df <- rbind(heri %>%select(-n), snp_heri)
+
+#Translate disease
+dc <- read.csv(paste0(path_project, "/Generated_Data/disease_code.txt"), sep="\t", header=T)
+colnames(dc)[1] <- "Disease"
+
+heri_df <- left_join(heri_df, dc, by="Disease")
+heri_df$full <- ifelse(heri_df$full=="Primary biliary cirrhosis", "Primary biliary cholangitis", heri_df$full)
+
+disease_order <- c("Crohn’s Disease", "Ulcerative colitis", "Sarcoidosis", "Graves’ disease", "Hashimoto’s hypothyrodisim", "Type 1 diabetes", "Multiple sclerosis", "Neuromyelitis Optica", "Myasthenia gravis", "Iridocyclitis", "Asthma", "Primary biliary cholangitis", "Primary sclerosing cholangitis", "Celiac disease", "Psoriasis", "Psoriatic arthritis", "Pyoderma gangrenosum", "Rheumatoid arthritis", "Takayasu's arteritis", "Systemic lupus erythematosus", "Sjögren’s syndrome", "Behcet’s disease", "Ankylosing spondylitis")
+
+heri_df$full <- factor(heri_df$full, levels=disease_order)
+
+p <- ggplot(heri_df)+
+  geom_col(aes(x=full, y=h2, fill=test), position = position_dodge2(preserve = "single"))+
+  geom_errorbar(aes(x=full, ymin=CI1, ymax=CI2), position = position_dodge2(preserve = "single"))+
+  theme_classic()+xlab("")+ylab(expression(h^2))+
+  theme(text = element_text(family="sans", size=8), axis.title = element_text(family="sans", size=8), axis.text = element_text(family="sans", size=8))+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+
+  ylim(c(0,1))+labs(fill=expression(h^2))
+
+#Combine:
+p_bottom <- ggarrange(f1,f2, nrow=1,ncol=2, labels=c("B)", "C)"),font.label = list(size=10, family="sans"))
+p_total <- ggarrange(p, p_bottom, nrow=2,ncol=1, labels=c("A)", ""),font.label = list(size=10, family="sans"))
+
+ggsave(p_total, file = paste0(path_project, "/Illustrations/H2_plot_IMIDs.tiff"), width = 174, height = 160, units = "mm", dpi = 300, bg="white")
+
+```
+
+## Correlation plot: Genealogy:
+```{r}
+cor_df <- read.csv(paste0(path_project, "/Output/Correlation_FS_prep_IMIDs.txt"), sep=";", header=T)
+cor_df$disease2 <- ifelse(cor_df$disease2=="uc", "UC", cor_df$disease2)
+
+#Correlation forest plot
+cor_df$plot.column <- "                                         "
+cor_df$"ρ [95% CI]" <- paste0(formatC(cor_df$cor, 2, format = "f"), " [", formatC(cor_df$CI1, 2, format = "f"), "-", formatC(cor_df$CI2, 2, format = "f"), "]")
+
+cor_df <- cor_df %>% mutate(P_adj = p.adjust(ifelse(P==0, 0.001, P), method="BH"))
+cor_df$P_adj <- formatC(cor_df$P_adj, digits=3)
+cor_df$P_adj <- ifelse(cor_df$P_adj==0.00207, "<0.002", cor_df$P_adj)
+
+cor_df <- cor_df %>% filter(disease2 %in% heri$Disease) #Only those with reasonable h2
+colnames(dc)[1] <- "disease2"
+cor_df <- left_join(cor_df, dc, by="disease2")
+cor_df$full <- factor(cor_df$full, levels=disease_order)
+
+cor_df_imids <- cor_df %>% arrange(full, disease1)
+dt_fig <- cor_df_imids %>% mutate(full=as.character(full)) %>% select(full, disease1, plot.column, "ρ [95% CI]", P_adj)  %>% rename("  " = disease1, " " = plot.column, Disease=full, "P adjusted"=P_adj)
+dt_fig[c(seq(3,31,2)),1] <- ""
+
+parse_mat <- matrix(FALSE, 
+                    nrow = nrow(dt_fig),
+                    ncol = 5)
+parse_mat[,5] <- TRUE 
+
+fig1 <- forest(data=dt_fig, est=cor_df_imids$cor, lower=cor_df_imids$CI1, upper=cor_df_imids$CI2, ci_column = 3, sizes=0.5, theme=forest_theme(base_size = 8, base_family = "sans", core=list(fg_params = list(parse=parse_mat))), xlab="ρ [95% CI]", xlim=c(-1,1))
+
+fig1 <- edit_plot(fig1, 
+               row = c(1,seq(2,31,2)), col=3,
+               which = c("ci"), 
+               gp = gpar(col = cd2_col))
+
+fig1 <- edit_plot(fig1, 
+               row = c(seq(3,31,2)), col=3,
+               which = c("ci"), 
+               gp = gpar(col = uc2_col))
+
+fig1 <- edit_plot(fig1, 
+               row = c(1,4,5,8,9,12,13,16,17,20,21,24,25,28,29), 
+               which = "background", 
+               gp = gpar(fill = predict_col[13]))
+
+fig1 <- edit_plot(fig1, 
+               row = c(2,3,6,7,10,11,14,15,18,19,22,23,26,27,30,31), 
+               which = "background", 
+               gp = gpar(fill = predict_col[12], alpha=0.5))
+
+
+ggsave(fig1, file = paste0(path_project, "/Illustrations/FS_correlation_IMIDs.tiff"), width = 150, height = 170, units = "mm", dpi = 300, bg="white")
+```
+
+
+
+## Correlation plot - Genetics:
+```{r}
+cor_df <- read.csv(paste0(path_project, "/Generated_Data/SNP_results/SNP_correlation_estimated_IMIDs.txt"), sep="\t", header=T) %>% mutate(CI1=rg-1.96*SE, CI2=rg+1.96*SE, P_adj = p.adjust(P, method="BH"))
+cor_df <- cor_df %>% filter(disease2 %in% snp_heri$Disease)
+
+#Correlation forest plot
+cor_df$plot.column <- "                                         "
+cor_df$"ρ [95% CI]" <- paste0(formatC(cor_df$rg, 2, format = "f"), " [", formatC(cor_df$CI1, 2, format = "f"), "-", formatC(cor_df$CI2, 2, format = "f"), "]")
+
+colnames(dc)[1] <- "disease2"
+cor_df <- left_join(cor_df, dc, by="disease2")
+cor_df$full <- ifelse(cor_df$full=="Primary biliary cirrhosis", "Primary biliary cholangitis", cor_df$full)
+cor_df$full <- factor(cor_df$full, levels=disease_order)
+
+cor_df_imids <- cor_df%>%arrange(full, disease1)
+cor_df_imids$P_adj <- formatC(cor_df_imids$P_adj, format="e", digits=2)
+cor_df_imids$P_adj  <- gsub("e", "%*%10^", cor_df_imids$P_adj)
+
+
+#Adjust P by number of diseases tested
+dt_fig <- cor_df_imids %>% mutate(full=as.character(full)) %>% select(full, disease1, plot.column, "ρ [95% CI]", P_adj)
+colnames(dt_fig) <- c("Disease", " ", " ", "ρ [95% CI]", "P adjusted")
+dt_fig[c(3,5,7,9,11,13,15,17),1] <- ""
+
+
+parse_mat <- matrix(FALSE, 
+                    nrow = nrow(dt_fig),
+                    ncol = 5)
+parse_mat[,5] <- TRUE 
+
+fig1 <- forest(data=dt_fig, est=cor_df_imids$rg, lower=cor_df_imids$CI1, upper=cor_df_imids$CI2, ci_column = 3, sizes=0.5, theme=forest_theme(base_size = 8, base_family = "sans", core=list(fg_params = list(parse=parse_mat))), xlab="ρ [95% CI]", xlim=c(-1,1))
+
+
+fig1 <- edit_plot(fig1, 
+               row = c(1,seq(2,17,2)), col=3,
+               which = c("ci"), 
+               gp = gpar(col = cd2_col))
+
+fig1 <- edit_plot(fig1, 
+               row = c(seq(3,17,2)), col=3,
+               which = c("ci"), 
+               gp = gpar(col = uc2_col))
+
+fig1 <- edit_plot(fig1, 
+               row = c(1,4,5,8,9,12,13,16,17), 
+               which = "background", 
+               gp = gpar(fill = predict_col[13]))
+
+fig1 <- edit_plot(fig1, 
+               row = c(2,3,6,7,10,11,14,15), 
+               which = "background", 
+               gp = gpar(fill = predict_col[12], alpha=0.5))
+
+
+ggsave(fig1, file = paste0(path_project, "/Illustrations/SNP_correlation_IMIDs.tiff"), width = 150, height = 120, units = "mm", dpi = 300, bg="white")
+
+```
+
+TEST: Just include all:
+```{r}
+cor_df <- read.csv(paste0(path_project, "/Generated_Data/SNP_results/SNP_correlation_estimated_IMIDs.txt"), sep="\t", header=T) %>% mutate(CI1=rg-1.96*SE, CI2=rg+1.96*SE, P_adj = p.adjust(P, method="BH"))
+
+#Correlation forest plot
+cor_df$plot.column <- "                                         "
+cor_df$"ρ [95% CI]" <- paste0(formatC(cor_df$rg, 2, format = "f"), " [", formatC(cor_df$CI1, 2, format = "f"), "-", formatC(cor_df$CI2, 2, format = "f"), "]")
+
+colnames(dc)[1] <- "disease2"
+cor_df <- left_join(cor_df, dc, by="disease2")
+cor_df$full <- ifelse(cor_df$full=="Primary biliary cirrhosis", "Primary biliary cholangitis", cor_df$full)
+cor_df$full <- factor(cor_df$full, levels=disease_order)
+cor_df <- cor_df %>% filter(!(full %in% c("Sarcoidosis", "Myasthenia gravis", "Sjögren’s syndrome", "Ankylosing spondylitis", "Iridocyclitis")))
+
+cor_df_imids <- cor_df%>%arrange(full, disease1)
+cor_df_imids$P_adj <- formatC(cor_df_imids$P_adj, format="e", digits=2)
+cor_df_imids$P_adj  <- gsub("e", "%*%10^", cor_df_imids$P_adj)
+
+
+#Adjust P by number of diseases tested
+dt_fig <- cor_df_imids %>% mutate(full=as.character(full)) %>% select(full, disease1, plot.column, "ρ [95% CI]", P_adj)
+colnames(dt_fig) <- c("Disease", " ", " ", "ρ [95% CI]", "P adjusted")
+dt_fig[c(seq(3,21,2)),1] <- ""
+
+parse_mat <- matrix(FALSE, 
+                    nrow = nrow(dt_fig),
+                    ncol = 5)
+parse_mat[,5] <- TRUE 
+
+fig1 <- forest(data=dt_fig, est=cor_df_imids$rg, lower=cor_df_imids$CI1, upper=cor_df_imids$CI2, ci_column = 3, sizes=0.5, theme=forest_theme(base_size = 8, base_family = "sans", core=list(fg_params = list(parse=parse_mat))), xlab="ρ [95% CI]", xlim=c(-1,1))
+
+
+fig1 <- edit_plot(fig1, 
+               row = c(1,seq(2,21,2)), col=3,
+               which = c("ci"), 
+               gp = gpar(col = cd2_col))
+
+fig1 <- edit_plot(fig1, 
+               row = c(seq(3,21,2)), col=3,
+               which = c("ci"), 
+               gp = gpar(col = uc2_col))
+
+fig1 <- edit_plot(fig1, 
+               row = c(1,4,5,8,9,12,13,16,17,20,21), 
+               which = "background", 
+               gp = gpar(fill = predict_col[13]))
+
+fig1 <- edit_plot(fig1, 
+               row = c(2,3,6,7,10,11,14,15,18,19), 
+               which = "background", 
+               gp = gpar(fill = predict_col[12], alpha=0.5))
+
+
+ggsave(fig1, file = paste0(path_project, "/Illustrations/SNP_correlation_IMIDs_all.tiff"), width = 150, height = 150, units = "mm", dpi = 300, bg="white")
+
+```
+
+
+
+## Plots of microbiota locally
+
+## Summarising figure:
+```{r}
+colfunc <- colorRampPalette(c(predict_col[1], accent_col[5]))
+colfunc(3)
+df <- read.csv(paste0(path_project, "/Generated_Data/Overview_table.txt"), sep="\t")
+df$Disease <- rownames(df)
+rownames(df) <- NULL
+
+df <- df %>% pivot_longer(!Disease, names_to = "Type", values_to = "Correlation")
+df$Disease <- trimws(df$Disease)
+df$Type <- gsub(".", "\n", df$Type, fixed=T)
+df$Disease <- factor(df$Disease, levels=rev(unique(df$Disease)))
+
+fig <- ggplot(df %>% filter(Disease!="Ulcerative colitis"))+
+  geom_tile(aes(x=Type, y=Disease, fill=Correlation))+
+  xlab("")+ylab("")+
+  scale_x_discrete(position = "top")+
+  theme(text = element_text(family="sans", size=8), axis.title = element_text(family="sans", size=8), axis.text = element_text(family="sans", size=8))+theme_classic()+
+  scale_fill_gradient2(low=predict_col[1], mid="white", high=accent_col[5], limits=c(-0.5,0.5), na.value="gray64")
+
+ggsave(fig, file = paste0(path_project, "/Illustrations/Results_overview.tiff"), width = 190, height = 200, units = "mm", dpi = 300, bg="white")
+
+df <- df %>% mutate(text=ifelse(is.na(Correlation), "x", ""))
+
+fig <- ggplot(df %>% filter(Disease!="Ulcerative colitis"))+
+  geom_tile(aes(x=Type, y=Disease, fill=Correlation))+
+  geom_text(aes(x=Type, y=Disease, label=text), color="grey45")+
+  xlab("")+ylab("")+
+  scale_x_discrete(position = "top")+
+  theme(text = element_text(family="sans", size=8), axis.title = element_text(family="sans", size=8), axis.text = element_text(family="sans", size=8))+theme_classic()+
+  scale_fill_gradient2(low=predict_col[1], mid="white", high=accent_col[5], limits=c(-0.5,0.5), na.value="white")
+```
+

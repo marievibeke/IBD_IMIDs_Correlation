@@ -1,0 +1,271 @@
+---
+title: "Untitled"
+output: html_document
+date: "2023-08-04"
+editor_options: 
+  chunk_output_type: console
+---
+
+Author: Marie Vibeke Vestergaard
+
+This script will assign family ID to all individuals and generates pairwise kinship coefficients.
+
+Read in packages:
+```{r}
+library(dplyr)
+library(ggplot2)
+library(ggpubr)
+```
+
+Data pathways:
+```{r}
+path_project <- "/ngc/projects2/predict_r/research/projects/0015_Genealogy_across_diseases" 
+path_registers <- "/ngc/projects2/predict_r/research/data/sds_registers/2024-12"
+```
+
+
+## Pairs of parents and offspring:
+Remove parents of: individuals with only one parental link, two of the same parent, adopted individuals, individuals with same-sex parents and for twins.
+```{r}
+#Read in data:
+t_person <- read.csv(paste0(path_registers, "/t_person.csv"), sep=";")
+sum(t_person$mlbnr == ".")
+dim(t_person) 
+t_temp <-t_person %>% filter(D_FODDATO != ".") 
+min(t_temp$D_FODDATO)
+max(t_person$D_FODDATO)
+
+#Find twins
+twins <- t_person %>% group_by(D_FODDATO, mlbnr, flbnr) %>% 
+  summarise(twin = n(), lbnr = paste0(lbnr, collapse= ", ")) %>% 
+  filter(mlbnr != "." & flbnr != "." & twin > 1)
+table(as.character(twins$twin))
+
+twin_lbnr <- unlist(c(strsplit(twins$lbnr, ", "))) #Remove individual's parental links
+t_person <- t_person %>% mutate(mlbnr = ifelse(lbnr %in% twin_lbnr, ".", mlbnr), flbnr = ifelse(lbnr %in% twin_lbnr, ".", flbnr))
+sum(t_person$mlbnr == ".") 
+rm(twins, twin_lbnr)
+
+#Remove parents that appear as both mother and father:
+both <- unique(t_person$mlbnr)[unique(t_person$mlbnr) %in% unique(t_person$flbnr)]
+length(both)
+t_person$mlbnr <- ifelse(t_person$mlbnr %in% both, ".", t_person$mlbnr)
+t_person$flbnr <- ifelse(t_person$flbnr %in% both, ".", t_person$flbnr)
+
+#Find persons with same parents or only with one parental link:
+t_person <- t_person %>% mutate(mlbnr = ifelse(mlbnr == flbnr|mlbnr =="." | flbnr == ".", ".", mlbnr), flbnr = ifelse(mlbnr == flbnr|mlbnr =="." | flbnr == ".", ".", flbnr))
+sum(t_person$mlbnr == ".") 
+
+#Find persons with same-sex parents
+female <- t_person %>% filter(C_KON =="K")
+female <- female$lbnr
+male <- t_person %>% filter(C_KON =="M")
+male <- male$lbnr
+
+t_person <- t_person %>% mutate(remove = ifelse(mlbnr == ".", "already", ifelse((mlbnr %in% male&flbnr %in%male) | (mlbnr %in% female&flbnr %in%female), "yes", "no")))
+table(t_person$remove)
+t_person <- t_person %>% mutate(mlbnr = ifelse(remove == "yes", ".", mlbnr), flbnr = ifelse(remove == "yes", ".", flbnr)) %>% select(-remove)
+sum(t_person$mlbnr == ".") 
+rm(female, male)
+
+#Save at this step - will be used to make ped file later (famID, ID, fatherID, motherID, sex)
+t_person <- t_person %>% select(lbnr, mlbnr, flbnr, C_KON)
+write.table(t_person, paste0(path_project, "/Generated_Data/edge_file_temp_IMID.csv"), sep=" ", col.names=T, quote=F, row.names=F)
+
+#Make edge list with IID and parent ID (one for each parent - excluding individuals without parental links)
+t_person <- t_person %>% select(-C_KON)
+first <- t_person %>% filter(mlbnr !=".") %>% select(-mlbnr) %>% rename(ID = lbnr, parentID = flbnr)
+second <- t_person %>% filter(mlbnr !=".") %>% select(-flbnr) %>% rename(ID = lbnr, parentID = mlbnr)
+edge_list <- rbind(first, second); rm(first, second)
+
+#Save
+write.table(edge_list, paste0(path_project, "/Generated_Data/edge_file_IMID.csv"), sep=" ", col.names=T, quote=F, row.names=F)
+
+#How many singletons?
+sum(!(t_person$lbnr %in% c(edge_list$ID, edge_list$parentID)))
+2618003/dim(t_person)[1] #0.2662776 -> 26.6%
+
+#How many edges?
+dim(edge_list)[1]
+
+#How many individuals included in edges?
+length(unique(c(edge_list$ID, edge_list$parentID))) 
+7213857/dim(t_person)[1]
+```
+
+## Assign family ID to individuals
+Using the python package networkx
+
+Move to terminal -> to folder (/ngc/projects2/predict_r/research/projects/0015_Genealogy_across_diseases/Scripts)
+
+Run iqsub
+
+Load anaconda:
+module load anaconda3/2021.11
+
+Run the python script components.py (python components.py)
+
+
+## Make ped file:
+fam ID, ID, father ID, mother ID, sex
+```{r}
+# Read in t_person from before
+t_person <- read.csv(paste0(path_project, "/Generated_Data/edge_file_temp_IMID.csv"), sep=" ")
+
+# Read in generated fam IDs
+famid <- read.csv(paste0(path_project, "/Generated_Data/ids_IMID.csv"), sep=" ")
+famid <- famid %>% filter(famid !=1) #The edge list should not have had header - became the first family
+
+#Family overview:
+fam_sizes <- famid %>% group_by(famid) %>% summarise(size = n())
+
+# Merge and change ordering of columns
+famid <- famid %>% rename(lbnr = indid)
+t_person$lbnr <- as.character(t_person$lbnr)
+t_person <- left_join(t_person, famid, by="lbnr") %>% select(famid, lbnr, flbnr, mlbnr, C_KON)
+
+#If singleton, remove that row
+sum(is.na(t_person$famid))
+t_person <- t_person %>% filter(!is.na(famid))
+
+#Recode 1=male, 2=female
+t_person$C_KON <- ifelse(t_person$C_KON=="M", 1, ifelse(t_person$C_KON=="K", 2, "."))
+
+#Save ped file:
+write.table(t_person, paste0(path_project, "/Generated_Data/ids_file_IMID.ped"), sep=" ", col.names=T, quote=F, row.names=F)
+```
+
+## Look into distribution of families - make plot
+Pie: percentage with no relatives, trios/quartets, other and the one big family
+Number of generations, number of founders
+```{r}
+#Look into the largest family
+large <- t_person %>% filter(famid == 2)
+sum(large$mlbnr == ".") 
+
+#Histogram:
+fam_sizes <- fam_sizes %>% mutate(type = ifelse(size == dim(large)[1]+1, "Largest family", ifelse(size <=4, "Trios/quartets", "Other families")))
+x_axis <- c("3", rep("", 6), "10", rep("", 9), "20", rep("", 9), "30", rep("", 9), "40", rep("", 9), "50", rep("", 9), "60", rep("", 9), "70", rep("", 5), "80", rep("", 5), "93", rep("", 3), "103", rep("", 4), "5991233")
+
+partb <- ggplot(fam_sizes)+
+  geom_bar(aes(x=reorder(as.character(size), size), fill=type))+
+  theme_classic()+xlab("Family size")+ylab("Count")+
+  theme(axis.text.x = element_text(angle=90, vjust=0.5, hjust=1), legend.title = element_blank(), legend.position = c(0.8, 0.8),
+        text = element_text(family="sans", size=8))+
+  scale_y_log10()+scale_x_discrete(labels = x_axis)
+
+#Pie chart
+trio_quartet <- fam_sizes %>% filter(size <=4)
+other <- fam_sizes %>% filter(size >4 & size !=5991233)
+dim(fam_sizes %>% filter(size ==3)) 
+dim(fam_sizes %>% filter(size ==4))
+
+part <- data.frame(Individuals = c(2617999, sum(trio_quartet$size), sum(other$size), 5991233), label = c("Singletons", "Trios/quartets", "Other families", "Largest family"))
+part <- part %>% mutate(percent = Individuals / sum(Individuals)*100)
+part <- part %>% mutate(percent = paste0(substr(percent, 1, 4), "%"))
+
+parta <- ggplot(part, aes(x="", y=Individuals, fill=label))+
+  geom_bar(stat="identity")+
+  coord_polar(theta = "y")+
+  theme_void()+
+  theme(legend.title = element_blank(), text = element_text(family="sans", size=8))+
+  geom_text(aes(label = percent), position = position_stack(vjust=0.5), size = 3)
+
+legend <- cowplot::get_legend(parta)
+parta2 <- ggarrange(parta+theme(legend.position = "none"), legend, nrow=2, ncol=1)
+both_fig <- ggarrange(parta2, partb, labels=c("A)", "B)"), font.label = list(size=10, family="sans"))
+
+ggsave(both_fig, filename = paste0(path_project, "/Illustrations/family_overview_IMID.tiff"), width = 174, height = 120, units="mm", dpi=300)
+```
+
+## Calculate kinship coefficient
+Using the python package pyAGH
+
+Prepare data for the python package:
+```{r}
+t_person <- read.csv(paste0(path_project, "/Generated_Data/ids_file_IMID.ped"), sep=" ")
+
+#Exclude links to missing parents (founders): -> both the father and the mother will be ".". pyAGH will generate parental links to "0". 
+t_person <- t_person %>% filter(mlbnr != ".")
+
+#No need for sex information:
+t_person <- t_person %>% select(-C_KON)
+
+#Change header:
+colnames(t_person) <- c("famID", "ID", "DAM", "SIRE")
+t_person <- t_person %>% select(famID, ID, SIRE, DAM)
+
+length(unique(t_person$famID)) #247295 families
+
+#Save:
+write.table(t_person, paste0(path_project, "/Generated_Data/ids_file_preped_IMID.csv"), sep=",", col.names=T, quote=F, row.names=F)
+
+```
+
+
+Move to terminal -> to folder (/ngc/projects2/predict_r/research/projects/0015_Genealogy_across_diseases/Scripts)
+
+Run iqsub
+
+Load anaconda:
+    module load anaconda3/2021.11
+
+Run the python script relatedness.py (python relatedness_biggest.py and python relatedness_rest.py)
+
+Result is table with columns for all pairwise connections: lbnr1, lbnr2, relatedness coefficient
+
+```{r}
+#less dataframe
+res1 <- read.csv(paste0(path_project, "/Generated_Data/relatedness_coeffs_less_IMID.txt.qz"), sep=" ", header=F)
+head(res1)
+write.table(res1, paste0(path_project, "/Generated_Data/relatedness_coeffs_less_IMID.txt"), sep=" ", col.names = F, quote = F, row.names = F)
+```
+
+Run the python script remove_duplicates.py (python remove_duplicates.py)
+
+Combine the two data frames:
+```{r}
+res1 <- read.csv(paste0(path_project, "/Generated_Data/relatedness_coeffs_biggest_no_duplicates_IMID.csv.gz"), sep=" ", header=T)
+dim(res1)
+res2 <- read.csv(paste0(path_project, "/Generated_Data/relatedness_coeffs_less_no_duplicates_IMID.csv.gz"), sep=" ", header=T)
+
+res <- rbind(res1, res2)
+dim(res) #49878224 
+rm(res1, res2)
+
+write.table(res, paste0(path_project, "/Generated_Data/relatedness_coeffs_all_no_duplicates_IMID.csv"), sep=" ", col.names = T, quote = F, row.names = F)
+
+# Compress file
+system(paste0("gzip ", paste0(path_project, "/Generated_Data/relatedness_coeffs_all_no_duplicates_IMID.csv")))
+```
+
+Run the python script relatedness_annotation.py (python relatedness_annotation.py)
+
+Look at annotation:
+```{r}
+res <- read.csv(paste0(path_project, "/Generated_Data/relatedness_annotation_IMID.txt.gz"), sep=" ", header=T)
+
+dim(res)[1] #54652666
+
+#Remove n_paths >2 -> inbreeding
+table(res$n_paths, useNA = "always") 
+dim(res %>% filter(n_paths >2))[1]/dim(res)[1]*100 #0.05055014% of pairs have >2 paths
+res <- res %>% filter(n_paths <3) 
+dim(res)[1] #54625039
+
+#Remove parent_rel >2 -> inbreeding
+table(res$parent_rel, useNA = "always")
+sum(res$parent_rel >2)/dim(res)[1]*100 #0.0008494273% of pairs removed
+res <- res %>% filter(parent_rel <3)
+dim(res)[1] #54624575 
+table(res$annot, useNA = "always") #Still 4883 with annot = NA. Different type of relationship than the included ones, = 0.0089392%
+
+#Remove annot = NA
+res <- res %>% filter(!is.na(annot))
+dim(res)[1] #54619692
+
+#Save:
+write.table(res, paste0(path_project, "/Generated_Data/relatedness_annotation_clean_IMID.csv"), sep=" ", col.names = T, quote = F, row.names = F)
+system(paste0("gzip ", paste0(path_project, "/Generated_Data/relatedness_annotation_clean_IMID.csv")))
+
+```

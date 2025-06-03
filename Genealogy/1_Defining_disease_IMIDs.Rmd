@@ -1,0 +1,401 @@
+---
+title: "Untitled"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+Author: Marie Vibeke Vestergaard
+
+This script will generate a disease file for the genealogy analysis:
+lbnr coupled to 0 or 1 for each disease of interest
+
+It also assigns family ID to all individuals and generates pairwise kinship coefficients.
+
+Read in packages:
+```{r}
+library(dplyr)
+library(ggplot2)
+```
+
+Data pathways:
+```{r}
+path_registers <- "/ngc/projects2/predict_r/research/data/sds_registers/2024-12"
+path_project <- "/ngc/projects2/predict_r/research/projects/0015_Genealogy_across_diseases"
+```
+
+
+## Disease file
+Read in all individuals and all A/B diagnoses from both LPR2 and LPR3. Combine:
+```{r}
+#All individuals -> keep only lbnr and sex
+t_person <- read.csv(paste0(path_registers, "/t_person.csv"), sep=";") %>% select(lbnr, C_KON)
+
+#LPR2 diagnoses
+t_diag <- read.csv(paste0(path_registers, "/t_diag.csv"), sep=";") %>% 
+  filter(!(C_DIAGMOD %in% c("1", "2")) & C_DIAGTYPE %in% c("A", "B")) %>% 
+  select(V_RECNUM, C_DIAG)
+#Translate V_RECNUM to lbnr
+t_adm <- read.csv(paste0(path_registers, "/t_adm.csv"), sep=";") %>% select(K_RECNUM, lbnr) %>% rename(V_RECNUM = K_RECNUM)
+t_diag <- left_join(t_diag, t_adm, by = "V_RECNUM") %>% select(lbnr, C_DIAG)
+rm(t_adm)
+
+#LPR3 diagnoses
+t_lpr3 <- read.csv(paste0(path_registers, "/diagnoser.csv"), sep=";") %>% 
+  filter(diagnosetype %in% c("A", "B") & senere_afkraeftet == "Nej") %>% 
+  select(dw_ek_kontakt, diagnosekode)
+#Translate dw_ek_kontakt to lbnr
+t_adm <- read.csv(paste0(path_registers, "/kontakter.csv"), sep=";") %>% select(dw_ek_kontakt, lbnr)
+t_lpr3 <- left_join(t_lpr3, t_adm, by = "dw_ek_kontakt") %>% select(lbnr, diagnosekode) %>% rename(C_DIAG = diagnosekode)
+rm(t_adm)
+
+#Combine LPR2 and LPR3
+t_diag <- rbind(t_diag, t_lpr3); rm(t_lpr3)
+```
+
+If a patients has been registered with A/B diagnosis for the concerning disease once, they count as cases.
+Both ICD-8 and ICD-10
+
+Add 0/1 columns for each disease for all individuals in register: 
+```{r}
+#CD
+t_CD <- t_diag %>% filter(grepl(paste("DK50", "56301", "56302", "56308", "56309", sep="|"), C_DIAG))
+t_CD <- data.frame(lbnr = unique(t_CD$lbnr), CD = rep(1, length(unique(t_CD$lbnr))))
+t_person <- left_join(t_person, t_CD, by = "lbnr")
+t_person$CD <- ifelse(is.na(t_person$CD), 0, 1) 
+rm(t_CD)
+
+#UC
+t_UC <- t_diag %>% filter(grepl(paste("DK51", "56319", "56904", sep="|"), C_DIAG))
+t_UC <- data.frame(lbnr = unique(t_UC$lbnr), UC = rep(1, length(unique(t_UC$lbnr))))
+t_person <- left_join(t_person, t_UC, by = "lbnr")
+t_person$UC <- ifelse(is.na(t_person$UC), 0, 1) 
+rm(t_UC)
+
+#RA
+t_RA <- t_diag %>% filter(grepl(paste("DM05", "DM06", "71219", "71239", "71259", "71299", sep="|"), C_DIAG))
+t_RA <- data.frame(lbnr = unique(t_RA$lbnr), RA = rep(1, length(unique(t_RA$lbnr))))
+t_person <- left_join(t_person, t_RA, by = "lbnr")
+t_person$RA <- ifelse(is.na(t_person$RA), 0, 1) 
+rm(t_RA)
+
+#Psoriasis
+t_Ps <- t_diag %>% filter(grepl(paste("DL400", "DL401", "DL402", "DL403", "DL404", "DL408", "DL409", "69610", "69619", "69609", sep="|"), C_DIAG))
+t_Ps <- data.frame(lbnr = unique(t_Ps$lbnr), Ps = rep(1, length(unique(t_Ps$lbnr))))
+t_person <- left_join(t_person, t_Ps, by = "lbnr")
+t_person$Ps <- ifelse(is.na(t_person$Ps), 0, 1) 
+rm(t_Ps)
+
+#Psoriatic arthritis
+t_PsA <- t_diag %>% filter(grepl(paste("DL405", "DM070", "DM071", "DM072", "DM073", "71219", "71239", "71259", "71209", sep="|"), C_DIAG))
+t_PsA <- data.frame(lbnr = unique(t_PsA$lbnr), PsA = rep(1, length(unique(t_PsA$lbnr))))
+t_person <- left_join(t_person, t_PsA, by = "lbnr")
+t_person$PsA <- ifelse(is.na(t_person$PsA), 0, 1) 
+rm(t_PsA)
+
+#MS
+t_MS <- t_diag %>% filter(grepl(paste("DG35", "34000", "34001", "34008", "34009", sep="|"), C_DIAG))
+t_MS <- data.frame(lbnr = unique(t_MS$lbnr), MS = rep(1, length(unique(t_MS$lbnr))))
+t_person <- left_join(t_person, t_MS, by = "lbnr")
+t_person$MS <- ifelse(is.na(t_person$MS), 0, 1) 
+rm(t_MS)
+
+#PSC
+t_PSC <- t_diag %>% filter(grepl(paste("DK8301", "57504", sep="|"), C_DIAG))
+t_PSC <- data.frame(lbnr = unique(t_PSC$lbnr), PSC = rep(1, length(unique(t_PSC$lbnr))))
+t_person <- left_join(t_person, t_PSC, by = "lbnr")
+t_person$PSC <- ifelse(is.na(t_person$PSC), 0, 1) 
+rm(t_PSC)
+
+#T1D
+t_T1D <- t_diag %>% filter(grepl(paste("DE10", "24900", "24901", "24902", "24903", "24904", "24905", "24906", "24907", "24908", "24909", sep="|"), C_DIAG))
+t_T1D <- data.frame(lbnr = unique(t_T1D$lbnr), T1D = rep(1, length(unique(t_T1D$lbnr))))
+t_person <- left_join(t_person, t_T1D, by = "lbnr")
+t_person$T1D <- ifelse(is.na(t_person$T1D), 0, 1) 
+rm(t_T1D)
+
+#Asthma
+t_Ast <- t_diag %>% filter(grepl(paste("DJ45", "DJ46", "49300", "49301", "49302", "49308", "49309", sep="|"), C_DIAG))
+t_Ast <- data.frame(lbnr = unique(t_Ast$lbnr), Ast = rep(1, length(unique(t_Ast$lbnr))))
+t_person <- left_join(t_person, t_Ast, by = "lbnr")
+t_person$Ast <- ifelse(is.na(t_person$Ast), 0, 1) 
+rm(t_Ast)
+
+#Celiac disease
+t_CeD <- t_diag %>% filter(grepl(paste("DK900", "26900", sep="|"), C_DIAG))
+t_CeD <- data.frame(lbnr = unique(t_CeD$lbnr), CeD = rep(1, length(unique(t_CeD$lbnr))))
+t_person <- left_join(t_person, t_CeD, by = "lbnr")
+t_person$CeD <- ifelse(is.na(t_person$CeD), 0, 1) 
+rm(t_CeD)
+
+#AS
+t_AS <- t_diag %>% filter(grepl(paste("DM45", "71249", sep="|"), C_DIAG))
+t_AS <- data.frame(lbnr = unique(t_AS$lbnr), AS = rep(1, length(unique(t_AS$lbnr))))
+t_person <- left_join(t_person, t_AS, by = "lbnr")
+t_person$AS <- ifelse(is.na(t_person$AS), 0, 1) 
+rm(t_AS)
+
+#LE
+t_LE <- t_diag %>% filter(grepl(paste("DM321", "DM328", "DM329", "73419",  sep="|"), C_DIAG))
+t_LE <- data.frame(lbnr = unique(t_LE$lbnr), LE = rep(1, length(unique(t_LE$lbnr))))
+t_person <- left_join(t_person, t_LE, by = "lbnr")
+t_person$LE <- ifelse(is.na(t_person$LE), 0, 1) 
+rm(t_LE)
+
+#Sar
+t_Sar <- t_diag %>% filter(grepl(paste("DD86", "13500", sep="|"), C_DIAG))
+t_Sar <- data.frame(lbnr = unique(t_Sar$lbnr), Sar = rep(1, length(unique(t_Sar$lbnr))))
+t_person <- left_join(t_person, t_Sar, by = "lbnr")
+t_person$Sar <- ifelse(is.na(t_person$Sar), 0, 1) 
+rm(t_Sar)
+
+#GD
+t_GD <- t_diag %>% filter(grepl(paste("DE050", "24200", sep="|"), C_DIAG))
+t_GD <- data.frame(lbnr = unique(t_GD$lbnr), GD = rep(1, length(unique(t_GD$lbnr))))
+t_person <- left_join(t_person, t_GD, by = "lbnr")
+t_person$GD <- ifelse(is.na(t_person$GD), 0, 1) 
+rm(t_GD)
+
+#Iri
+t_Iri <- t_diag %>% filter(grepl(paste("DH200","DH201","DH208","DH209", "36400", "36401", "36402", "36403", "36404", "36408", "36409", sep="|"), C_DIAG))
+t_Iri <- data.frame(lbnr = unique(t_Iri$lbnr), Iri = rep(1, length(unique(t_Iri$lbnr))))
+t_person <- left_join(t_person, t_Iri, by = "lbnr")
+t_person$Iri <- ifelse(is.na(t_person$Iri), 0, 1) 
+rm(t_Iri)
+
+#BD
+t_BD <- t_diag %>% filter(grepl(paste("DM352", sep="|"), C_DIAG))
+t_BD <- data.frame(lbnr = unique(t_BD$lbnr), BD = rep(1, length(unique(t_BD$lbnr))))
+t_person <- left_join(t_person, t_BD, by = "lbnr")
+t_person$BD <- ifelse(is.na(t_person$BD), 0, 1) 
+rm(t_BD)
+
+#PG
+t_PG <- t_diag %>% filter(grepl(paste("DL88", sep="|"), C_DIAG))
+t_PG <- data.frame(lbnr = unique(t_PG$lbnr), PG = rep(1, length(unique(t_PG$lbnr))))
+t_person <- left_join(t_person, t_PG, by = "lbnr")
+t_person$PG <- ifelse(is.na(t_person$PG), 0, 1) 
+rm(t_PG)
+
+#TA
+t_TA <- t_diag %>% filter(grepl(paste("DM314", sep="|"), C_DIAG))
+t_TA <- data.frame(lbnr = unique(t_TA$lbnr), TA = rep(1, length(unique(t_TA$lbnr))))
+t_person <- left_join(t_person, t_TA, by = "lbnr")
+t_person$TA <- ifelse(is.na(t_person$TA), 0, 1) 
+rm(t_TA)
+
+#MG
+t_MG <- t_diag %>% filter(grepl(paste("DG700", "DG733", "DG724", sep="|"), C_DIAG))
+t_MG <- data.frame(lbnr = unique(t_MG$lbnr), MG = rep(1, length(unique(t_MG$lbnr))))
+t_person <- left_join(t_person, t_MG, by = "lbnr")
+t_person$MG <- ifelse(is.na(t_person$MG), 0, 1) 
+rm(t_MG)
+
+#NO
+t_NO <- t_diag %>% filter(grepl(paste("DG36", "DG371", "DG373", "DG374", "DG379", sep="|"), C_DIAG))
+t_NO <- data.frame(lbnr = unique(t_NO$lbnr), NO = rep(1, length(unique(t_NO$lbnr))))
+t_person <- left_join(t_person, t_NO, by = "lbnr")
+t_person$NO <- ifelse(is.na(t_person$NO), 0, 1) 
+rm(t_NO)
+
+#SS
+t_SS <- t_diag %>% filter(grepl(paste("DM350", sep="|"), C_DIAG))
+t_SS <- data.frame(lbnr = unique(t_SS$lbnr), SS = rep(1, length(unique(t_SS$lbnr))))
+t_person <- left_join(t_person, t_SS, by = "lbnr")
+t_person$SS <- ifelse(is.na(t_person$SS), 0, 1) 
+rm(t_SS)
+
+#PBC
+t_PBC <- t_diag %>% filter(grepl(paste("DK743", sep="|"), C_DIAG))
+t_PBC <- data.frame(lbnr = unique(t_PBC$lbnr), PBC = rep(1, length(unique(t_PBC$lbnr))))
+t_person <- left_join(t_person, t_PBC, by = "lbnr")
+t_person$PBC <- ifelse(is.na(t_person$PBC), 0, 1) 
+rm(t_PBC)
+
+#HH
+t_HH <- t_diag %>% filter(grepl(paste("DE063", sep="|"), C_DIAG))
+t_HH <- data.frame(lbnr = unique(t_HH$lbnr), HH = rep(1, length(unique(t_HH$lbnr))))
+t_person <- left_join(t_person, t_HH, by = "lbnr")
+t_person$HH <- ifelse(is.na(t_person$HH), 0, 1) 
+rm(t_HH)
+
+```
+
+Save file:
+```{r}
+write.table(t_person, paste0(path_project, "/Generated_Data/disease_file_IMIDs.csv"), sep=" ", col.names=T, quote=F, row.names=F)
+system(paste0("gzip ", paste0(path_project, "/Generated_Data/disease_file_IMIDs.csv")))
+```
+
+## Overview of disease data:
+```{r}
+t_person <- read.csv(paste0(path_project, "/Generated_Data/disease_file_IMIDs.csv.gz"), sep=" ")
+head(t_person)
+
+CD <- t_person %>% filter(CD==1)
+dim(CD)[1]
+dim(CD)[1] / dim(t_person)[1] *100
+sum(CD$C_KON=="K") / dim(CD)[1]*100
+rm(CD)
+
+UC <- t_person %>% filter(UC==1)
+dim(UC)[1]
+dim(UC)[1] / dim(t_person)[1]*100
+sum(UC$C_KON=="K") / dim(UC)[1]*100
+rm(UC)
+
+RA <- t_person %>% filter(RA==1)
+dim(RA)[1]
+dim(RA)[1] / dim(t_person)[1]*100
+sum(RA$C_KON=="K") / dim(RA)[1]*100
+rm(RA)
+
+Ps <- t_person %>% filter(Ps==1)
+dim(Ps)[1]
+dim(Ps)[1] / dim(t_person)[1]*100
+sum(Ps$C_KON=="K") / dim(Ps)[1]*100
+rm(Ps)
+
+PsA <- t_person %>% filter(PsA==1)
+dim(PsA)[1]
+dim(PsA)[1] / dim(t_person)[1]*100
+sum(PsA$C_KON=="K") / dim(PsA)[1]*100
+rm(PsA)
+
+MS <- t_person %>% filter(MS==1)
+dim(MS)[1]
+dim(MS)[1] / dim(t_person)[1]*100
+sum(MS$C_KON=="K") / dim(MS)[1]*100
+rm(MS)
+
+PSC <- t_person %>% filter(PSC==1)
+dim(PSC)[1]
+dim(PSC)[1] / dim(t_person)[1]*100
+sum(PSC$C_KON=="K") / dim(PSC)[1]*100
+rm(PSC)
+
+T1D <- t_person %>% filter(T1D==1)
+dim(T1D)[1]
+dim(T1D)[1] / dim(t_person)[1]*100
+sum(T1D$C_KON=="K") / dim(T1D)[1]*100
+rm(T1D)
+
+Ast <- t_person %>% filter(Ast==1)
+dim(Ast)[1]
+dim(Ast)[1] / dim(t_person)[1]*100
+sum(Ast$C_KON=="K") / dim(Ast)[1]*100
+rm(Ast)
+
+CeD <- t_person %>% filter(CeD==1)
+dim(CeD)[1]
+dim(CeD)[1] / dim(t_person)[1]*100
+sum(CeD$C_KON=="K") / dim(CeD)[1]*100
+rm(CeD)
+
+AS <- t_person %>% filter(AS==1)
+dim(AS)[1]
+dim(AS)[1] / dim(t_person)[1]*100
+sum(AS$C_KON=="K") / dim(AS)[1]*100
+rm(AS)
+
+LE <- t_person %>% filter(LE==1)
+dim(LE)[1]
+dim(LE)[1] / dim(t_person)[1]*100
+sum(LE$C_KON=="K") / dim(LE)[1]*100
+rm(LE)
+
+Sar <- t_person %>% filter(Sar==1)
+dim(Sar)[1]
+dim(Sar)[1] / dim(t_person)[1]*100
+sum(Sar$C_KON=="K") / dim(Sar)[1]*100
+rm(Sar)
+
+GD <- t_person %>% filter(GD==1)
+dim(GD)[1]
+dim(GD)[1] / dim(t_person)[1]*100
+sum(GD$C_KON=="K") / dim(GD)[1]*100
+rm(GD)
+
+Iri <- t_person %>% filter(Iri==1)
+dim(Iri)[1]
+dim(Iri)[1] / dim(t_person)[1]*100
+sum(Iri$C_KON=="K") / dim(Iri)[1]*100
+rm(Iri)
+
+BD <- t_person %>% filter(BD==1)
+dim(BD)[1]
+dim(BD)[1] / dim(t_person)[1]*100
+sum(BD$C_KON=="K") / dim(BD)[1]*100
+rm(BD)
+
+PG <- t_person %>% filter(PG==1)
+dim(PG)[1]
+dim(PG)[1] / dim(t_person)[1]*100
+sum(PG$C_KON=="K") / dim(PG)[1]*100
+rm(PG)
+
+TA <- t_person %>% filter(TA==1)
+dim(TA)[1]
+dim(TA)[1] / dim(t_person)[1]*100
+sum(TA$C_KON=="K") / dim(TA)[1]*100
+rm(TA)
+
+MG <- t_person %>% filter(MG==1)
+dim(MG)[1]
+dim(MG)[1] / dim(t_person)[1]*100
+sum(MG$C_KON=="K") / dim(MG)[1]*100
+rm(MG)
+
+NO <- t_person %>% filter(NO==1)
+dim(NO)[1]
+dim(NO)[1] / dim(t_person)[1]*100
+sum(NO$C_KON=="K") / dim(NO)[1]*100
+rm(NO)
+
+SS <- t_person %>% filter(SS==1)
+dim(SS)[1]
+dim(SS)[1] / dim(t_person)[1]*100
+sum(SS$C_KON=="K") / dim(SS)[1]*100
+rm(SS)
+
+PBC <- t_person %>% filter(PBC==1)
+dim(PBC)[1]
+dim(PBC)[1] / dim(t_person)[1]*100
+sum(PBC$C_KON=="K") / dim(PBC)[1]*100
+rm(PBC)
+
+HH <- t_person %>% filter(HH==1)
+dim(HH)[1]
+dim(HH)[1] / dim(t_person)[1]*100
+sum(HH$C_KON=="K") / dim(HH)[1]*100
+rm(HH)
+
+```
+
+## CD and UC in focus: use our 2-diag definition!
+```{r}
+path_basefiles <- "/ngc/projects2/predict_r/research/data/basefiles/2025-01" 
+t_person <- read.csv(paste0(path_project, "/Generated_Data/disease_file_IMIDs.csv.gz"), sep=" ")
+head(t_person)
+
+ibd <- read.csv(paste0(path_basefiles, "/ibd_patients_two_registrations_2025_01_16.csv"), sep=";")
+cd <- ibd %>% filter(IBD_reg2=="CD")
+uc <- ibd %>% filter(IBD_reg2=="UC")
+
+t_person <- t_person %>% mutate(cd=ifelse(lbnr %in% cd$lbnr, 1, 0), uc=ifelse(lbnr %in% uc$lbnr, 1, 0))
+CD <- t_person %>% filter(cd==1)
+dim(CD)[1]
+dim(CD)[1] / dim(t_person)[1] *100
+sum(CD$C_KON=="K") / dim(CD)[1]*100
+rm(CD)
+
+UC <- t_person %>% filter(uc==1)
+dim(UC)[1]
+dim(UC)[1] / dim(t_person)[1]*100
+sum(UC$C_KON=="K") / dim(UC)[1]*100
+rm(UC)
+
+write.table(t_person, paste0(path_project, "/Generated_Data/disease_file_IMIDs.csv"), sep=" ", col.names=T, quote=F, row.names=F)
+system(paste0("gzip ", paste0(path_project, "/Generated_Data/disease_file_IMIDs.csv")))
+```
+

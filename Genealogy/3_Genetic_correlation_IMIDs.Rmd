@@ -1,0 +1,348 @@
+---
+title: "Untitled"
+output: html_document
+date: "2024-02-23"
+editor_options: 
+  chunk_output_type: console
+---
+
+Read in packages:
+```{r}
+library(dplyr)
+library(ggplot2)
+library(ggpubr)
+library(polycor)
+library(ggdendro)
+library(lubridate)
+library( grid )
+library( forestploter )
+packageVersion("polycor")
+
+predict_col <- c("#4F2641", "#EAE4E3", "#FEF2FA", "#FADBC4", "#FFEAD7", "#FEF5ED",  "#C2C6B5",  "#F7FBED", "#F8F9F3", "#898A87", "#000000", "#E0E1DC", "#FFFFFF")
+accent_col <- c("#CD68AB", "#85416E", "#FF906D", "#FFC498", "#A5BC64", "#B1CD64","#E0F3A6")
+
+hc_col <- accent_col[6]
+cd1_col <- accent_col[1]
+cd2_col <- accent_col[2]
+uc1_col <- accent_col[4]
+uc2_col <- accent_col[3]
+
+path_project <- "/ngc/projects2/predict_r/research/projects/0015_Genealogy_across_diseases" 
+path_registers <- "/ngc/projects2/predict_r/research/data/sds_registers/2022-09"
+```
+
+Read in phenotypes file:
+```{r}
+t_person <- read.csv(paste0(path_project, "/Generated_Data/disease_file_IMIDs.csv.gz"), sep=" ")
+
+#Add date of birth
+t_dat <- read.csv(paste0(path_registers, "/t_person.csv"), sep=";") %>% select(lbnr, D_FODDATO)
+t_person <- left_join(t_person, t_dat, by="lbnr")
+rm(t_dat)
+
+t_person <- t_person %>% filter(D_FODDATO!=".")
+t_person$D_FODDATO <- as.Date(t_person$D_FODDATO)
+
+t_person <- t_person %>% mutate(total_diag = cd+uc+RA+Ps+MS+PSC+T1D+Ast+CeD+AS+LE+Sar+GD+Iri+BD+PG+TA+MG+NO+SS+PBC+HH)
+
+t_sum <- t_person %>% group_by(year(D_FODDATO)) %>% summarise(med = median(total_diag), Q1 = quantile(total_diag, probs = 0.25), Q3 = quantile(total_diag, probs = 0.75), mean = mean(total_diag))
+colnames(t_sum)[1] <- "Year"
+head(t_sum)
+
+fig <- ggplot(t_sum)+
+  geom_line(aes(x=Year, y=mean))+
+  theme_classic()+
+  xlab("Year of birth")+ylab("Mean number of total diagnoses")+
+  geom_vline(xintercept = 1910, linetype="dashed")+
+  geom_vline(xintercept = 2010, linetype="dashed")+
+  theme(text = element_text(family="sans", size=8))
+
+ggsave(fig, filename=paste0(path_project, "/Illustrations/Mean_n_diseases_IMIDs.tiff"), width = 80, height =80, units="mm", dpi=300, bg="white")
+```
+
+Read in pairwise relationships:
+```{r}
+res <- read.csv(paste0(path_project, "/Generated_Data/relatedness_annotation_clean_IMID.csv.gz"), sep=" ", header=T)
+```
+
+Prepare dataset: 
+LPR is from 1977. 
+Exclude individuals born after 2010
+Exclude individuals born before 1910
+```{r}
+dim(t_person)[1] 
+t_person <- t_person %>% filter(D_FODDATO<=as.Date("2010-01-01") & D_FODDATO>=as.Date("1910-01-01"))
+dim(t_person)[1] 
+t_person <- t_person %>% select(-total_diag, -CD,-UC)
+
+#Combine dataframe, filter res for date of birth and check the order (id1 older than id2)
+res <- res %>% select(id1, id2, R, annot)
+t_person <- t_person %>% rename(id1 = lbnr)
+res <- left_join(res, t_person, by="id1") %>% filter(!is.na(D_FODDATO))
+t_person <- t_person %>% rename(C_KON2=C_KON, cd2=cd,uc2=uc,RA2=RA,Ps2=Ps,PsA2=PsA,MS2=MS,PSC2=PSC,T1D2=T1D, Ast2=Ast,CeD2=CeD,AS2=AS,LE2=LE,Sar2=Sar,GD2=GD,Iri2=Iri,BD2=BD,PG2=PG,TA2=TA,MG2=MG,NO2=NO,SS2=SS,PBC2=PBC,HH2=HH, id2=id1, D_FODDATO2 = D_FODDATO)
+res <- left_join(res, t_person, by="id2") %>% filter(!is.na(D_FODDATO2))
+table(res$annot)
+
+dim(res)[1]
+
+res <- res %>% mutate(order_check = ifelse(D_FODDATO2>D_FODDATO, 1,0))
+table(res$order_check)
+res0 <- res %>% filter(order_check==0) 
+colnames(res0) <- c("id2", "id1", "R", "annot","C_KON2","RA2", "Ps2","PsA2","MS2", "PSC2","T1D2","Ast2","CeD2","AS2","LE2","Sar2","GD2","Iri2","BD2","PG2", "TA2","MG2", "NO2","SS2" ,"PBC2","HH2", "cd2","uc2", "D_FODDATO2", "C_KON", "RA", "Ps","PsA","MS","PSC", "T1D", "Ast", "CeD",  "AS","LE" ,"Sar", "GD", "Iri", "BD", "PG","TA","MG","NO","SS", "PBC", "HH", "cd","uc", "D_FODDATO", "order_check")
+res0 <- res0 %>% select(colnames(res))
+
+res <- rbind(res %>% filter(order_check==1), res0) %>% select(-order_check)
+rm(res0)
+
+#Save file:
+write.table(res, paste0(path_project, "/Generated_Data/Filtered_pairs_w_phenotype_IMIDs_test.csv"), sep=" ", col.names = T, quote = F, row.names = F)
+system(paste0("gzip ", paste0(path_project, "/Generated_Data/Filtered_pairs_w_phenotype_IMIDs_test.csv")))
+```
+
+
+Look into FS vs. PO:
+```{r}
+res <- read.csv(paste0(path_project, "/Generated_Data/Filtered_pairs_w_phenotype_IMIDs_test.csv.gz"), sep=" ", header=T)
+
+res_PO <- res %>% filter(annot=="PO")
+res_FS <- res %>% filter(annot=="FS")
+rm(res)
+
+mean(res_PO$cd) 
+mean(res_PO$cd2) 
+mean(res_PO$uc) 
+mean(res_PO$uc2) 
+
+mean(res_FS$cd) 
+mean(res_FS$cd2) 
+mean(res_FS$uc) 
+mean(res_FS$uc2) 
+
+#PO is more skewed than FS!
+```
+
+
+Calculate h2 and correlation with CD and UC:
+```{r}
+res <- read.csv(paste0(path_project, "/Generated_Data/Filtered_pairs_w_phenotype_IMIDs_test.csv.gz"), sep=" ", header=T)
+head(res)
+
+#Focus on full sibs:
+res_FS <- res %>% filter(annot=="FS")
+
+#Number of sibling paris with at least one has the disease
+j <- 6
+df_n <- data.frame()
+for (i in colnames(res_FS)[6:28]){
+
+  print(dim(res_FS[res_FS[,j]==1|res_FS[,j+25]==1,])[1])
+  print(colnames(res_FS[j]))
+  print(colnames(res_FS[j+25]))
+  df_n <- rbind(df_n, data.frame(disease=i, n=dim(res_FS[res_FS[,j]==1|res_FS[,j+25]==1,])[1]))
+j <- j+1
+}
+
+
+heri <- data.frame()
+
+#Genetic heritability of CD for FS:
+cd_res <- table(res_FS[, c("cd", "cd2")])
+t <- polychor(cd_res, std.err=T)
+cd_rho <- t$rho #Correlation coefficient
+cd_var <- t$var[[1]]
+cd_rho/0.5 #heritability
+sqrt(cd_var*(1/0.5)^2) #SE of heritability
+(cd_rho/0.5)-1.96*sqrt(cd_var*(1/0.5)^2) #(CI lower)
+(cd_rho/0.5)+1.96*sqrt(cd_var*(1/0.5)^2) #(CI upper)
+
+heri <- rbind(heri, data.frame(Disease = "CD", h2 = cd_rho/0.5, CI1=(cd_rho/0.5)-1.96*sqrt(cd_var*(1/0.5)^2), CI2=(cd_rho/0.5)+1.96*sqrt(cd_var*(1/0.5)^2), n=df_n$n[df_n$disease=="cd"]))
+  
+#Genetic heritability of UC for FS:
+uc_res <- table(res_FS[, c("uc", "uc2")])
+t <- polychor(uc_res, std.err=T)
+uc_rho <- t$rho #Correlation coefficient
+uc_var <- t$var[[1]]
+uc_rho/0.5 # (heritability)
+sqrt(uc_var*(1/0.5)^2) #(SE of heritability)
+(uc_rho/0.5)-1.96*sqrt(uc_var*(1/0.5)^2) # (CI lower)
+(uc_rho/0.5)+1.96*sqrt(uc_var*(1/0.5)^2) # (CI higher)
+
+heri <- rbind(heri, data.frame(Disease = "UC", h2 = uc_rho/0.5, CI1=(uc_rho/0.5)-1.96*sqrt(uc_var*(1/0.5)^2), CI2=(uc_rho/0.5)+1.96*sqrt(uc_var*(1/0.5)^2), n=df_n$n[df_n$disease=="uc"]))
+
+#Correlation CD - UC:
+x1y2 <- polychor(table(res_FS[, c("cd", "uc2")]), std.err=T)
+y1x2 <- polychor(table(res_FS[, c("uc", "cd2")]), std.err=T)
+
+h_cd <- cd_rho/0.5
+h_uc <- uc_rho/0.5
+seh_cd <- sqrt(cd_var*(1/0.5)^2)
+seh_uc <- sqrt(uc_var*(1/0.5)^2)
+
+cor_res <- mean(c(x1y2$rho,y1x2$rho))/sqrt(cd_rho*uc_rho)
+se_res <- sqrt(x1y2$var+y1x2$var)
+cor_df <- data.frame(disease1="CD", disease2="UC", cor = cor_res, CI1=cor_res-1.96*se_res, CI2=cor_res+1.96*se_res)
+
+
+#Loop through all other diseases
+diseases <- colnames(res_FS)[6:26]
+
+for (d1 in diseases){ #Issues with TA
+  #Heritability:
+  x1x2 <- polychor(table(res_FS[, c(d1, paste0(d1, "2"))]), std.err=T)
+  hx <- x1x2$rho/0.5
+  sehx <- sqrt(x1x2$var[[1]]*(1/0.5)^2)
+  heri <- rbind(heri, data.frame(Disease = d1, h2 = hx, CI1=hx-1.96*sehx, CI2=hx+1.96*sehx, n=df_n$n[df_n$disease==d1]))
+  
+  #Correlation with CD:
+  x1y2 <- polychor(table(res_FS[, c(d1, "cd2")]), std.err=T)
+  y1x2 <- polychor(table(res_FS[, c("cd", paste0(d1, "2"))]), std.err=T)
+
+  cor_res <- mean(c(x1y2$rho,y1x2$rho))/(sqrt(x1x2$rho*cd_rho))
+  se_res <- sqrt(x1y2$var+y1x2$var)
+  
+  cor_df <- rbind(cor_df, data.frame(disease1="CD", disease2=d1, cor = cor_res, CI1=cor_res-1.96*se_res, CI2=cor_res+1.96*se_res))
+  
+  #Correlation with UC:
+  x1y2 <- polychor(table(res_FS[, c(d1, "uc2")]), std.err=T)
+  y1x2 <- polychor(table(res_FS[, c("uc", paste0(d1, "2"))]), std.err=T)
+
+  cor_res <- mean(c(x1y2$rho,y1x2$rho))/(sqrt(x1x2$rho*uc_rho))
+  se_res <- sqrt(x1y2$var+y1x2$var)
+  
+  cor_df <- rbind(cor_df, data.frame(disease1="UC", disease2=d1, cor = cor_res, CI1=cor_res-1.96*se_res, CI2=cor_res+1.96*se_res))
+}
+
+write.table(cor_df, paste0(path_project, "/Output/Correlation_FS_IMIDs.txt"), sep=";", col.names = T, row.names = F, quote = F)
+write.table(heri, paste0(path_project, "/Output/Heritability_FS_IMIDs.txt"), sep=";", col.names = T, row.names = F, quote = F)
+
+```
+
+Permutation test: generate P-value:
+```{r}
+res <- read.csv(paste0(path_project, "/Generated_Data/Filtered_pairs_w_phenotype_IMIDs.csv.gz"), sep=" ", header=T)
+res_FS <- res %>% filter(annot=="FS")
+rm(res)
+
+cor_df <- read.csv(paste0(path_project, "/Output/Correlation_FS_IMIDs.txt"), sep=";")
+cor_df <- cor_df %>% filter(!(disease2 %in% c("PSC", "BD", "TA", "PG", "MG", "PBC")))
+cor_df$disease2 <- ifelse(cor_df$disease2=="UC", "uc", cor_df$disease2)
+
+
+#First: for correlation with CD:
+#Generate empty vectors:
+for (i in unique(cor_df$disease2)){
+  assign(paste0(i, "_vec"), c())
+}
+
+#Shuffle cd and cd2 1000 times and recalculate correlation:
+for (j in 1:500){
+  set.seed(j+500)
+  res_sub <- res_FS[sample(1:nrow(res_FS)), c("cd", "cd2")]
+  cd_rho <- polychor(table(res_sub[, c("cd", "cd2")]))
+  
+  for (i in unique(cor_df$disease2)){
+    x1y2 <- polychor(table(res_FS[,i], res_sub$cd2))
+    y1x2 <- polychor(table(res_sub$cd, res_FS[,paste0(i, "2")]))
+    x1x2 <- polychor(table(res_FS[, c(i, paste0(i, "2"))]))
+    assign(paste0(i, "_vec"), c(eval(parse(text=paste0(i, "_vec"))), mean(c(x1y2,y1x2))/(sqrt(x1x2*cd_rho))))
+  }
+  print(j)
+}
+
+#save - can later be expanded if necessary:
+for (i in unique(cor_df$disease2)){
+  write.table(eval(parse(text=paste0(i, "_vec"))), file=paste0(path_project, "/Output/Permutation_CD_", i, "_500.txt"), sep=";", col.names = T, row.names = F, quote = F)
+}
+#Combine
+for (i in unique(cor_df$disease2)){
+  assign(paste0(i, "_vec"), rbind(read.csv(file=paste0(path_project, "/Output/Permutation_CD_", i, "_500.txt"), sep=";"),
+                                  read.csv(file=paste0(path_project, "/Output/Permutation_CD_", i, "_500_2.txt"), sep=";")))
+}
+
+#Create P-value:
+cor_sub <- cor_df%>% filter(disease1=="CD")
+p_df <- data.frame()
+for (i in unique(cor_df$disease2)){
+  p <- sum(abs(eval(parse(text=paste0(i, "_vec"))))>=abs(cor_sub[cor_sub$disease2==i,"cor"]))/1000
+  p_df <- rbind(p_df, data.frame(disease1="CD", disease2=i, P=p))
+}
+
+
+#Also for UC:
+#First: for correlation with CD:
+#Generate empty vectors:
+loop_disease <- unique(cor_df$disease2)[unique(cor_df$disease2)!="uc"]
+for (i in loop_disease){
+  assign(paste0(i, "_vec"), c())
+}
+
+#Shuffle cd and cd2 1000 times and recalculate correlation:
+for (j in 1:500){
+  set.seed(j+500)
+  res_sub <- res_FS[sample(1:nrow(res_FS)), c("uc", "uc2")]
+  cd_rho <- polychor(table(res_sub[, c("uc", "uc2")]))
+  
+  for (i in loop_disease){
+    x1y2 <- polychor(table(res_FS[,i], res_sub$uc2))
+    y1x2 <- polychor(table(res_sub$uc, res_FS[,paste0(i, "2")]))
+    x1x2 <- polychor(table(res_FS[, c(i, paste0(i, "2"))]))
+    assign(paste0(i, "_vec"), c(eval(parse(text=paste0(i, "_vec"))), mean(c(x1y2,y1x2))/(sqrt(x1x2*cd_rho))))
+  }
+  print(j)
+}
+
+#save - can later be expanded to 1000 if necessary:
+for (i in loop_disease){
+  write.table(eval(parse(text=paste0(i, "_vec"))), file=paste0(path_project, "/Output/Permutation_UC_", i, "_500_2.txt"), sep=";", col.names = T, row.names = F, quote = F)
+}
+#Combine:
+for (i in loop_disease){
+  assign(paste0(i, "_vec"), rbind(read.csv(file=paste0(path_project, "/Output/Permutation_UC_", i, "_500.txt"), sep=";"),
+                                  read.csv(file=paste0(path_project, "/Output/Permutation_UC_", i, "_500_2.txt"), sep=";")))
+}
+
+
+#Create P-value:
+cor_sub <- cor_df%>% filter(disease1=="UC")
+for (i in loop_disease){
+  p <- sum(abs(eval(parse(text=paste0(i, "_vec"))))>=abs(cor_sub[cor_sub$disease2==i,"cor"]))/1000
+  p_df <- rbind(p_df, data.frame(disease1="UC", disease2=i, P=p))
+}
+
+cor_df <- left_join(cor_df, p_df, by=c("disease1", "disease2")) #Note: 0.000 corresponds to <0.001
+
+write.table(cor_df, paste0(path_project, "/Output/Correlation_FS_prep_IMIDs.txt"), sep=";", col.names = T, row.names = F, quote = F)
+
+```
+
+
+
+
+## H2 over the years
+```{r}
+res <- read.csv(paste0(path_project, "/Generated_Data/Filtered_pairs_w_phenotype_IMIDs_test.csv.gz"), sep=" ", header=T)
+res_FS <- res %>% filter(annot=="FS") %>% mutate(D_FODDATO=as.Date(D_FODDATO), D_FODDATO2=as.Date(D_FODDATO2))
+
+diseases <- colnames(res_FS)[6:28]
+periods <- c(0:4)
+heri_time <- data.frame()
+
+for (i in periods){
+  df_sub <- res_FS %>% filter(D_FODDATO>(as.Date("1910-01-01")+years(20*i))&
+       D_FODDATO2>(as.Date("1910-01-01")+years(20*i))&
+       D_FODDATO<=(as.Date("1910-01-01")+years(20*(i+1)))&
+       D_FODDATO2<=(as.Date("1910-01-01")+years(20*(i+1))))
+  
+  for (d1 in diseases){
+    if ((sum(df_sub$d1)+sum(df_sub[,paste0(d1,"")]))>100){
+      x1x2 <- polychor(table(df_sub[, c(d1, paste0(d1, "2"))]), std.err=T)
+      hx <- x1x2$rho*2
+    sehx <- sqrt(x1x2$var[1]*2^2)
+    heri_time <- rbind(heri_time, data.frame(Disease = d1, Period=i, h2 = hx, CI1=hx-1.96*sehx, CI2=hx+1.96*sehx, n=(sum(df_sub$d1)+sum(df_sub[,paste0(d1,"")]))))
+    }
+  }
+}
+
+write.table(heri_time, paste0(path_project, "/Output/Heritability_20_years_IMIDs.txt"), sep=";", col.names = T, row.names = F, quote = F)
+```
+
