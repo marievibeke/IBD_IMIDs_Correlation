@@ -1,6 +1,6 @@
-#Code used for downloading, evaluating, preparing, analyzing and visualizing microbiota data
+### Code used for downloading, evaluating, preparing, analyzing and visualizing microbiota data
 
-#Microbiota metadata was collected manually. 
-#The metadata was evaluated in step 0 and code for downloading the raw fastq files are available in Microbiota_data_download.txt
-The data was subjedcted to quality control and run through the DADA2 pipeline. 
-#The .Rmd files are ordered according to their step in the analysis. 
+#### Microbiota metadata was collected manually. 
+#### The metadata was evaluated in step 0 and code for downloading the raw fastq files are available in Microbiota_data_download.txt
+#### The data was subjedcted to quality control and run through the DADA2 pipeline. 
+#### The .Rmd files are ordered according to their step in the analysis. 
