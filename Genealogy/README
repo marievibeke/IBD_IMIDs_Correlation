@@ -1,0 +1,6 @@
+# The code used for collecting full siblings and their disease history. 
+# They were analyzed for correlation across diseases and results are visualized. 
+
+
+# The .Rmd files conducting the main steps, and are ordered in analyses steps. 
+# The .py files were run concurrently, and they are mentioned in the .Rmd files. 
