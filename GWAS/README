@@ -2,4 +2,4 @@
 
 #GWAS summary statistics were downloaded and homogenized
 #We calculated genetic correlation across diseases
-#Code for visualizing can be found in the Microbiota folder ()
+#Code for visualizing can be found in the Genealogy folder (Genealogy/4_Figures_IMIDs.Rmd)
