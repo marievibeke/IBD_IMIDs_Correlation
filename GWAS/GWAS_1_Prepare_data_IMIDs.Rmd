@@ -1,0 +1,588 @@
+---
+title: "Untitled"
+output: html_document
+date: '2024-07-05'
+editor_options: 
+  chunk_output_type: inline
+---
+
+## Read in packages and data
+```{r message=FALSE, warning=FALSE, error=TRUE}
+library(tidyverse)
+library(ggplot2)
+library(dplyr)
+library(ggpubr)
+library(rtracklayer)
+library(GenomicRanges)
+
+packageVersion("tidyverse")
+packageVersion("ggplot2")
+packageVersion("dplyr")
+packageVersion("ggpubr")
+
+library( grid )
+library( forestploter )
+
+predict_col <- c("#4F2641", "#EAE4E3", "#FEF2FA", "#FADBC4", "#FFEAD7", "#FEF5ED",  "#C2C6B5",  "#F7FBED", "#F8F9F3", "#898A87", "#000000", "#E0E1DC", "#FFFFFF")
+accent_col <- c("#CD68AB", "#85416E", "#FF906D", "#FFC498", "#A5BC64", "#B1CD64","#E0F3A6")
+
+hc_col <- accent_col[6]
+cd1_col <- accent_col[1]
+cd2_col <- accent_col[2]
+uc1_col <- accent_col[4]
+uc2_col <- accent_col[3]
+```
+
+
+## All downloaded summary stats -> LDSC
+#Prepare data for munge_sumstats (locally)
+A1, A2, SNP, P_value, beta, chr, pos, se
+```{r}
+path <- "~/vol1"
+#For all harmonized datasets:
+h_data <- c("LE", "NO", "PBC", "Ps", "CD", "UC", "PSC", "MS", "Iri", "GD", "Sar", "MG", "T1D")
+
+for (i in h_data){
+  df <- read.csv(file=paste0(path, "/GWAS_sumstats/", i, "_h.tsv.gz"), sep="\t")
+  head(df)
+  df <- df %>% select(hm_other_allele, hm_effect_allele, hm_rsid, p_value, hm_beta, hm_chrom, hm_pos, standard_error)
+  colnames(df) <- c("A1", "A2", "SNP", "P_value", "beta", "chr", "pos", "se")
+
+  write.table(df, paste0(path, "/GWAS_sumstats/prep/", i, ".txt"), quote=F, row.names = F, col.names = T, sep="\t")
+  rm(df)
+}
+
+#For PsA
+df <- read.csv(file=paste0(path, "/GWAS_sumstats/PsA_h.tsv.gz"), sep="\t")
+df <- df %>% select(other_allele, effect_allele, rsid, p_value, beta, chromosome, base_pair_location, standard_error)
+colnames(df) <- c("A1", "A2", "SNP", "P_value", "beta", "chr", "pos", "se")
+write.table(df, paste0(path, "/GWAS_sumstats/prep/PsA.txt"), quote=F, row.names = F, col.names = T, sep="\t")
+rm(df)
+
+#OR instead of Betas:
+h_OR <- c("PSC")
+for (i in h_OR){
+  df <- read.csv(file=paste0(path, "/GWAS_sumstats/", i, "_h.tsv.gz"), sep="\t") %>% select(hm_other_allele, hm_effect_allele, hm_rsid, p_value, hm_odds_ratio, hm_chrom, hm_pos, standard_error)
+  colnames(df) <- c("A1", "A2", "SNP", "P_value", "OR", "chr", "pos", "se")
+
+  write.table(df, paste0(path, "/GWAS_sumstats/prep/", i, ".txt"), quote=F, row.names = F, col.names = T, sep="\t")
+  rm(df)
+}
+
+#z-values instead of betas:
+h_z <- c("LE")
+for (i in h_z){
+  df <- read.csv(file=paste0(path, "/GWAS_sumstats/", i, "_h.tsv.gz"), sep="\t") %>% select(hm_other_allele, hm_effect_allele, hm_rsid, p_value, hm_chrom, hm_pos, z, effect_allele, other_allele) 
+  df$hm_z <- ifelse(df$hm_other_allele==toupper(df$other_allele) & df$hm_effect_allele==toupper(df$effect_allele), df$z, ifelse(df$hm_other_allele==toupper(df$effect_allele) & df$hm_effect_allele==toupper(df$other_allele), -df$z, NA))
+  df <- df %>% select(hm_other_allele, hm_effect_allele, hm_rsid, p_value, hm_chrom, hm_pos, hm_z)
+  colnames(df) <- c("A1", "A2", "SNP", "P_value", "chr", "pos", "z")
+
+  write.table(df, paste0(path, "/GWAS_sumstats/prep/", i, ".txt"), quote=F, row.names = F, col.names = T, sep="\t")
+  rm(df)
+}
+
+#The build38:
+#Ast
+Ast <- read.csv(file=paste0(path, "/GWAS_sumstats/Ast_build38.tsv.gz"), sep="\t")
+head(Ast)
+Ast <- Ast %>% select(other_allele, effect_allele, rs_id, p_value, beta, chromosome, base_pair_location, standard_error)
+colnames(Ast) <- c("A1", "A2", "SNP", "P_value", "beta", "chr", "pos", "se")
+write.table(Ast, paste0(path, "/GWAS_sumstats/prep/Ast.txt"), quote=F, row.names = F, col.names = T, sep="\t")
+rm(Ast)
+
+#The build37 -> liftover to build38
+download.file("https://hgdownload.soe.ucsc.edu/gbdb/hg19/liftOver/hg19ToHg38.over.chain.gz", "hg19ToHg38.over.chain.gz")
+system("gzip -d hg19ToHg38.over.chain.gz")
+chain_file=rtracklayer::import.chain("hg19ToHg38.over.chain")
+
+#AS, CeD, RA, SS
+#AS
+AS <- read.csv(file=paste0(path, "/GWAS_sumstats/AS_build37.tsv"), sep="\t")
+head(AS)
+
+AS_new <- GRanges(seqnames = AS$chromosome, ranges=IRanges(AS$base_pair_location, end=AS$base_pair_location), mcols = AS %>% select(variant_id, effect_allele, other_allele, beta, standard_error, p_value)) 
+seqlevelsStyle(AS_new) = "UCSC"
+
+AS_new = liftOver(AS_new, chain_file)
+AS_new <- as.data.frame(AS_new)
+
+AS_new <- AS_new %>% select(mcols.other_allele, mcols.effect_allele, mcols.variant_id, mcols.p_value, mcols.beta, seqnames, start, mcols.standard_error)
+colnames(AS_new) <- c("A1", "A2", "SNP", "P_value", "beta", "chr", "pos", "se")
+write.table(AS_new, paste0(path, "/GWAS_sumstats/prep/AS.txt"), quote=F, row.names = F, col.names = T, sep="\t")
+rm(AS, AS_new)
+
+#CeD
+CeD <- read.csv(file=paste0(path, "/GWAS_sumstats/CeD_build37.tsv"), sep="\t")
+head(CeD)
+
+CeD_new <- GRanges(seqnames = CeD$chromosome, ranges=IRanges(CeD$base_pair_location, end=CeD$base_pair_location), mcols = CeD %>% select(variant_id, effect_allele, other_allele, beta, standard_error, p_value)) 
+seqlevelsStyle(CeD_new) = "UCSC"
+
+CeD_new = liftOver(CeD_new, chain_file)
+CeD_new <- as.data.frame(CeD_new)
+
+CeD_new <- CeD_new %>% select(mcols.other_allele, mcols.effect_allele, mcols.variant_id, mcols.p_value, mcols.beta, seqnames, start, mcols.standard_error)
+colnames(CeD_new) <- c("A1", "A2", "SNP", "P_value", "beta", "chr", "pos", "se")
+write.table(CeD_new, paste0(path, "/GWAS_sumstats/prep/CeD.txt"), quote=F, row.names = F, col.names = T, sep="\t")
+rm(CeD, CeD_new)
+
+#RA
+RA <- read.csv(file=paste0(path, "/GWAS_sumstats/RA_build37.tsv.gz"), sep="\t")
+head(RA)
+
+RA <- RA %>% select(other_allele, effect_allele, variant_id, p_value, beta, chromosome, base_pair_location_grch38, standard_error)
+colnames(RA) <- c("A1", "A2", "SNP", "P_value", "beta", "chr", "pos", "se")
+write.table(RA, paste0(path, "/GWAS_sumstats/prep/RA.txt"), quote=F, row.names = F, col.names = T, sep="\t")
+rm(RA)
+
+#SS
+SS <- read.csv(file=paste0(path, "/GWAS_sumstats/SS_build37.tsv"), sep="\t")
+head(SS)
+
+SS_new <- GRanges(seqnames = SS$chromosome, ranges=IRanges(SS$base_pair_location, end=SS$base_pair_location), mcols = SS %>% select(variant_id, effect_allele, other_allele, beta, standard_error, p_value)) 
+seqlevelsStyle(SS_new) = "UCSC"
+
+SS_new = liftOver(SS_new, chain_file)
+SS_new <- as.data.frame(SS_new)
+
+SS_new <- SS_new %>% select(mcols.other_allele, mcols.effect_allele, mcols.variant_id, mcols.p_value, mcols.beta, seqnames, start, mcols.standard_error)
+colnames(SS_new) <- c("A1", "A2", "SNP", "P_value", "beta", "chr", "pos", "se")
+write.table(SS_new, paste0(path, "/GWAS_sumstats/prep/SS.txt"), quote=F, row.names = F, col.names = T, sep="\t")
+rm(SS, SS_new)
+
+```
+
+```{r}
+all_data <- c("SS", "RA", "CeD", "PsA", "AS", "Ast", h_data)
+for (i in all_data){
+  system(paste0("gzip ", paste0(path, "/GWAS_sumstats/prep/", i, ".txt")))
+
+} 
+```
+
+## Run munge_sumstats to prepare data for LDSC - NGC:
+
+```{bash, engine.opts='-l'}
+module load anaconda3/2021.11
+module load anaconda2/4.4.0
+module load ldsc/20180810
+
+snplist=/ngc/projects2/predict_r/research/projects/0007_Genetics_SNP_QC_IMP_PKU_NordIBD/ExternalData/baselineLF_v2.2.UKB/w_hm3.snplist
+dir=/ngc/projects2/predict_r/research/projects/0015_Genealogy_across_diseases/Generated_Data
+dir1=/ngc/projects2/predict_r/research/data/sumstats_misc
+
+munge_sumstats.py \
+--sumstats $dir1/CD.txt.gz \
+--N-cas 12194 --N-con 28072 \
+--out $dir/sumstats/munged/CD \
+--merge-alleles $snplist
+
+munge_sumstats.py \
+--sumstats $dir1/UC.txt.gz \
+--N-cas 12366 --N-con 33609 \
+--out $dir/sumstats/munged/UC \
+--merge-alleles $snplist
+
+munge_sumstats.py \
+--sumstats $dir1/Sar.txt.gz \
+--N-cas 257 --N-con 456138 \
+--out $dir/sumstats/munged/Sar \
+--merge-alleles $snplist
+
+munge_sumstats.py \
+--sumstats $dir1/GD.txt.gz \
+--N-cas 210 --N-con 456138 \
+--out $dir/sumstats/munged/GD \
+--merge-alleles $snplist
+
+munge_sumstats.py \
+--sumstats $dir1/T1D.txt.gz \
+--N-cas 18942 --N-con 501638 \
+--out $dir/sumstats/munged/T1D \
+--merge-alleles $snplist
+
+munge_sumstats.py \
+--sumstats $dir1/MS.txt.gz \
+--N-cas 4888 --N-con 10395 \
+--out $dir/sumstats/munged/MS \
+--merge-alleles $snplist
+
+munge_sumstats.py \
+--sumstats $dir1/NO.txt.gz \
+--N-cas 129 --N-con 784 \
+--out $dir/sumstats/munged/NO \
+--merge-alleles $snplist
+
+munge_sumstats.py \
+--sumstats $dir1/MG.txt.gz \
+--N-cas 1873 --N-con 36370 \
+--out $dir/sumstats/munged/MG \
+--merge-alleles $snplist
+
+munge_sumstats.py \
+--sumstats $dir1/Iri.txt.gz \
+--N-cas 134 --N-con 456214 \
+--out $dir/sumstats/munged/Iri \
+--merge-alleles $snplist
+
+munge_sumstats.py \
+--sumstats $dir1/Ast.txt.gz \
+--N-cas 121940 --N-con 1254131 \
+--out $dir/sumstats/munged/Ast \
+--merge-alleles $snplist
+
+munge_sumstats.py \
+--sumstats $dir1/PBC.txt.gz \
+--N-cas 8021 --N-con 16489 \
+--out $dir/sumstats/munged/PBC \
+--merge-alleles $snplist
+
+munge_sumstats.py \
+--sumstats $dir1/PSC.txt.gz \
+--N-cas 2871 --N-con 12019 \
+--out $dir/sumstats/munged/PSC \
+--merge-alleles $snplist
+
+munge_sumstats.py \
+--sumstats $dir1/CeD.txt.gz \
+--N-cas 2364 --N-con 324074 \
+--out $dir/sumstats/munged/CeD \
+--merge-alleles $snplist
+
+munge_sumstats.py \
+--sumstats $dir1/Ps.txt.gz \
+--N-cas 15967 --N-con 28194 \
+--out $dir/sumstats/munged/Ps \
+--merge-alleles $snplist
+
+munge_sumstats.py \
+--sumstats $dir1/PsA.txt.gz \
+--N-cas 5065 --N-con 21286 \
+--out $dir/sumstats/munged/PsA \
+--merge-alleles $snplist
+
+munge_sumstats.py \
+--sumstats $dir1/RA.txt.gz \
+--N-cas 22350 --N-con 74823 \
+--out $dir/sumstats/munged/RA \
+--merge-alleles $snplist
+
+munge_sumstats.py \
+--sumstats $dir1/LE.txt.gz \
+--N-cas 4943 --N-con 8483 \
+--out $dir/sumstats/munged/LE \
+--merge-alleles $snplist
+
+munge_sumstats.py \
+--sumstats $dir1/SS.txt.gz \
+--N-cas 647 --N-con 324074 \
+--out $dir/sumstats/munged/SS \
+--merge-alleles $snplist
+
+munge_sumstats.py \
+--sumstats $dir1/AS.txt.gz \
+--N-cas 1344 --N-con 324074 \
+--out $dir/sumstats/munged/AS \
+--merge-alleles $snplist
+```
+
+## Analyze h2 and correlations with CD:
+
+```{bash, engine.opts='-l'}
+module load anaconda3/2021.11
+module load anaconda2/4.4.0
+module load ldsc/20180810
+
+dir=/ngc/projects2/predict_r/research/projects/0015_Genealogy_across_diseases/Generated_Data/sumstats/munged
+OUT=/ngc/projects2/predict_r/research/projects/0015_Genealogy_across_diseases/Generated_Data/SNP_results
+
+ldsc.py \
+--rg $dir/CD.sumstats.gz,$dir/UC.sumstats.gz \
+--ref-ld-chr /ngc/projects2/predict_r/research/projects/0007_Genetics_SNP_QC_IMP_PKU_NordIBD/ExternalData/eur_w_ld_chr/ \
+--w-ld-chr /ngc/projects2/predict_r/research/projects/0007_Genetics_SNP_QC_IMP_PKU_NordIBD/ExternalData/eur_w_ld_chr/ \
+--out $OUT/Correlation_CD_UC
+
+ldsc.py \
+--rg $dir/CD.sumstats.gz,$dir/SS.sumstats.gz \
+--ref-ld-chr /ngc/projects2/predict_r/research/projects/0007_Genetics_SNP_QC_IMP_PKU_NordIBD/ExternalData/eur_w_ld_chr/ \
+--w-ld-chr /ngc/projects2/predict_r/research/projects/0007_Genetics_SNP_QC_IMP_PKU_NordIBD/ExternalData/eur_w_ld_chr/ \
+--out $OUT/Correlation_CD_SS
+
+ldsc.py \
+--rg $dir/CD.sumstats.gz,$dir/RA.sumstats.gz \
+--ref-ld-chr /ngc/projects2/predict_r/research/projects/0007_Genetics_SNP_QC_IMP_PKU_NordIBD/ExternalData/eur_w_ld_chr/ \
+--w-ld-chr /ngc/projects2/predict_r/research/projects/0007_Genetics_SNP_QC_IMP_PKU_NordIBD/ExternalData/eur_w_ld_chr/ \
+--out $OUT/Correlation_CD_RA
+
+ldsc.py \
+--rg $dir/CD.sumstats.gz,$dir/CeD.sumstats.gz \
+--ref-ld-chr /ngc/projects2/predict_r/research/projects/0007_Genetics_SNP_QC_IMP_PKU_NordIBD/ExternalData/eur_w_ld_chr/ \
+--w-ld-chr /ngc/projects2/predict_r/research/projects/0007_Genetics_SNP_QC_IMP_PKU_NordIBD/ExternalData/eur_w_ld_chr/ \
+--out $OUT/Correlation_CD_CeD
+
+ldsc.py \
+--rg $dir/CD.sumstats.gz,$dir/AS.sumstats.gz \
+--ref-ld-chr /ngc/projects2/predict_r/research/projects/0007_Genetics_SNP_QC_IMP_PKU_NordIBD/ExternalData/eur_w_ld_chr/ \
+--w-ld-chr /ngc/projects2/predict_r/research/projects/0007_Genetics_SNP_QC_IMP_PKU_NordIBD/ExternalData/eur_w_ld_chr/ \
+--out $OUT/Correlation_CD_AS
+
+ldsc.py \
+--rg $dir/CD.sumstats.gz,$dir/Ast.sumstats.gz \
+--ref-ld-chr /ngc/projects2/predict_r/research/projects/0007_Genetics_SNP_QC_IMP_PKU_NordIBD/ExternalData/eur_w_ld_chr/ \
+--w-ld-chr /ngc/projects2/predict_r/research/projects/0007_Genetics_SNP_QC_IMP_PKU_NordIBD/ExternalData/eur_w_ld_chr/ \
+--out $OUT/Correlation_CD_Ast
+
+ldsc.py \
+--rg $dir/CD.sumstats.gz,$dir/LE.sumstats.gz \
+--ref-ld-chr /ngc/projects2/predict_r/research/projects/0007_Genetics_SNP_QC_IMP_PKU_NordIBD/ExternalData/eur_w_ld_chr/ \
+--w-ld-chr /ngc/projects2/predict_r/research/projects/0007_Genetics_SNP_QC_IMP_PKU_NordIBD/ExternalData/eur_w_ld_chr/ \
+--out $OUT/Correlation_CD_LE
+
+ldsc.py \
+--rg $dir/CD.sumstats.gz,$dir/NO.sumstats.gz \
+--ref-ld-chr /ngc/projects2/predict_r/research/projects/0007_Genetics_SNP_QC_IMP_PKU_NordIBD/ExternalData/eur_w_ld_chr/ \
+--w-ld-chr /ngc/projects2/predict_r/research/projects/0007_Genetics_SNP_QC_IMP_PKU_NordIBD/ExternalData/eur_w_ld_chr/ \
+--out $OUT/Correlation_CD_NO
+
+ldsc.py \
+--rg $dir/CD.sumstats.gz,$dir/PBC.sumstats.gz \
+--ref-ld-chr /ngc/projects2/predict_r/research/projects/0007_Genetics_SNP_QC_IMP_PKU_NordIBD/ExternalData/eur_w_ld_chr/ \
+--w-ld-chr /ngc/projects2/predict_r/research/projects/0007_Genetics_SNP_QC_IMP_PKU_NordIBD/ExternalData/eur_w_ld_chr/ \
+--out $OUT/Correlation_CD_PBC
+
+ldsc.py \
+--rg $dir/CD.sumstats.gz,$dir/Ps.sumstats.gz \
+--ref-ld-chr /ngc/projects2/predict_r/research/projects/0007_Genetics_SNP_QC_IMP_PKU_NordIBD/ExternalData/eur_w_ld_chr/ \
+--w-ld-chr /ngc/projects2/predict_r/research/projects/0007_Genetics_SNP_QC_IMP_PKU_NordIBD/ExternalData/eur_w_ld_chr/ \
+--out $OUT/Correlation_CD_Ps
+
+ldsc.py \
+--rg $dir/CD.sumstats.gz,$dir/PSC.sumstats.gz \
+--ref-ld-chr /ngc/projects2/predict_r/research/projects/0007_Genetics_SNP_QC_IMP_PKU_NordIBD/ExternalData/eur_w_ld_chr/ \
+--w-ld-chr /ngc/projects2/predict_r/research/projects/0007_Genetics_SNP_QC_IMP_PKU_NordIBD/ExternalData/eur_w_ld_chr/ \
+--out $OUT/Correlation_CD_PSC
+
+ldsc.py \
+--rg $dir/CD.sumstats.gz,$dir/MS.sumstats.gz \
+--ref-ld-chr /ngc/projects2/predict_r/research/projects/0007_Genetics_SNP_QC_IMP_PKU_NordIBD/ExternalData/eur_w_ld_chr/ \
+--w-ld-chr /ngc/projects2/predict_r/research/projects/0007_Genetics_SNP_QC_IMP_PKU_NordIBD/ExternalData/eur_w_ld_chr/ \
+--out $OUT/Correlation_CD_MS
+
+ldsc.py \
+--rg $dir/CD.sumstats.gz,$dir/Iri.sumstats.gz \
+--ref-ld-chr /ngc/projects2/predict_r/research/projects/0007_Genetics_SNP_QC_IMP_PKU_NordIBD/ExternalData/eur_w_ld_chr/ \
+--w-ld-chr /ngc/projects2/predict_r/research/projects/0007_Genetics_SNP_QC_IMP_PKU_NordIBD/ExternalData/eur_w_ld_chr/ \
+--out $OUT/Correlation_CD_Iri
+
+ldsc.py \
+--rg $dir/CD.sumstats.gz,$dir/GD.sumstats.gz \
+--ref-ld-chr /ngc/projects2/predict_r/research/projects/0007_Genetics_SNP_QC_IMP_PKU_NordIBD/ExternalData/eur_w_ld_chr/ \
+--w-ld-chr /ngc/projects2/predict_r/research/projects/0007_Genetics_SNP_QC_IMP_PKU_NordIBD/ExternalData/eur_w_ld_chr/ \
+--out $OUT/Correlation_CD_GD
+
+ldsc.py \
+--rg $dir/CD.sumstats.gz,$dir/Sar.sumstats.gz \
+--ref-ld-chr /ngc/projects2/predict_r/research/projects/0007_Genetics_SNP_QC_IMP_PKU_NordIBD/ExternalData/eur_w_ld_chr/ \
+--w-ld-chr /ngc/projects2/predict_r/research/projects/0007_Genetics_SNP_QC_IMP_PKU_NordIBD/ExternalData/eur_w_ld_chr/ \
+--out $OUT/Correlation_CD_Sar
+
+ldsc.py \
+--rg $dir/CD.sumstats.gz,$dir/MG.sumstats.gz \
+--ref-ld-chr /ngc/projects2/predict_r/research/projects/0007_Genetics_SNP_QC_IMP_PKU_NordIBD/ExternalData/eur_w_ld_chr/ \
+--w-ld-chr /ngc/projects2/predict_r/research/projects/0007_Genetics_SNP_QC_IMP_PKU_NordIBD/ExternalData/eur_w_ld_chr/ \
+--out $OUT/Correlation_CD_MG
+
+ldsc.py \
+--rg $dir/CD.sumstats.gz,$dir/T1D.sumstats.gz \
+--ref-ld-chr /ngc/projects2/predict_r/research/projects/0007_Genetics_SNP_QC_IMP_PKU_NordIBD/ExternalData/eur_w_ld_chr/ \
+--w-ld-chr /ngc/projects2/predict_r/research/projects/0007_Genetics_SNP_QC_IMP_PKU_NordIBD/ExternalData/eur_w_ld_chr/ \
+--out $OUT/Correlation_CD_T1D
+
+ldsc.py \
+--rg $dir/CD.sumstats.gz,$dir/PsA.sumstats.gz \
+--ref-ld-chr /ngc/projects2/predict_r/research/projects/0007_Genetics_SNP_QC_IMP_PKU_NordIBD/ExternalData/eur_w_ld_chr/ \
+--w-ld-chr /ngc/projects2/predict_r/research/projects/0007_Genetics_SNP_QC_IMP_PKU_NordIBD/ExternalData/eur_w_ld_chr/ \
+--out $OUT/Correlation_CD_PsA
+
+```
+
+
+## Analyze correlations with UC:
+
+```{bash, engine.opts='-l'}
+module load anaconda3/2021.11
+module load anaconda2/4.4.0
+module load ldsc/20180810
+
+dir=/ngc/projects2/predict_r/research/projects/0015_Genealogy_across_diseases/Generated_Data/sumstats/munged
+OUT=/ngc/projects2/predict_r/research/projects/0015_Genealogy_across_diseases/Generated_Data/SNP_results
+
+ldsc.py \
+--rg $dir/UC.sumstats.gz,$dir/SS.sumstats.gz \
+--ref-ld-chr /ngc/projects2/predict_r/research/projects/0007_Genetics_SNP_QC_IMP_PKU_NordIBD/ExternalData/eur_w_ld_chr/ \
+--w-ld-chr /ngc/projects2/predict_r/research/projects/0007_Genetics_SNP_QC_IMP_PKU_NordIBD/ExternalData/eur_w_ld_chr/ \
+--out $OUT/Correlation_UC_SS
+
+ldsc.py \
+--rg $dir/UC.sumstats.gz,$dir/PsA.sumstats.gz \
+--ref-ld-chr /ngc/projects2/predict_r/research/projects/0007_Genetics_SNP_QC_IMP_PKU_NordIBD/ExternalData/eur_w_ld_chr/ \
+--w-ld-chr /ngc/projects2/predict_r/research/projects/0007_Genetics_SNP_QC_IMP_PKU_NordIBD/ExternalData/eur_w_ld_chr/ \
+--out $OUT/Correlation_UC_PsA
+
+ldsc.py \
+--rg $dir/UC.sumstats.gz,$dir/RA.sumstats.gz \
+--ref-ld-chr /ngc/projects2/predict_r/research/projects/0007_Genetics_SNP_QC_IMP_PKU_NordIBD/ExternalData/eur_w_ld_chr/ \
+--w-ld-chr /ngc/projects2/predict_r/research/projects/0007_Genetics_SNP_QC_IMP_PKU_NordIBD/ExternalData/eur_w_ld_chr/ \
+--out $OUT/Correlation_UC_RA
+
+ldsc.py \
+--rg $dir/UC.sumstats.gz,$dir/CeD.sumstats.gz \
+--ref-ld-chr /ngc/projects2/predict_r/research/projects/0007_Genetics_SNP_QC_IMP_PKU_NordIBD/ExternalData/eur_w_ld_chr/ \
+--w-ld-chr /ngc/projects2/predict_r/research/projects/0007_Genetics_SNP_QC_IMP_PKU_NordIBD/ExternalData/eur_w_ld_chr/ \
+--out $OUT/Correlation_UC_CeD
+
+ldsc.py \
+--rg $dir/UC.sumstats.gz,$dir/AS.sumstats.gz \
+--ref-ld-chr /ngc/projects2/predict_r/research/projects/0007_Genetics_SNP_QC_IMP_PKU_NordIBD/ExternalData/eur_w_ld_chr/ \
+--w-ld-chr /ngc/projects2/predict_r/research/projects/0007_Genetics_SNP_QC_IMP_PKU_NordIBD/ExternalData/eur_w_ld_chr/ \
+--out $OUT/Correlation_UC_AS
+
+ldsc.py \
+--rg $dir/UC.sumstats.gz,$dir/Ast.sumstats.gz \
+--ref-ld-chr /ngc/projects2/predict_r/research/projects/0007_Genetics_SNP_QC_IMP_PKU_NordIBD/ExternalData/eur_w_ld_chr/ \
+--w-ld-chr /ngc/projects2/predict_r/research/projects/0007_Genetics_SNP_QC_IMP_PKU_NordIBD/ExternalData/eur_w_ld_chr/ \
+--out $OUT/Correlation_UC_Ast
+
+ldsc.py \
+--rg $dir/UC.sumstats.gz,$dir/LE.sumstats.gz \
+--ref-ld-chr /ngc/projects2/predict_r/research/projects/0007_Genetics_SNP_QC_IMP_PKU_NordIBD/ExternalData/eur_w_ld_chr/ \
+--w-ld-chr /ngc/projects2/predict_r/research/projects/0007_Genetics_SNP_QC_IMP_PKU_NordIBD/ExternalData/eur_w_ld_chr/ \
+--out $OUT/Correlation_UC_LE
+
+ldsc.py \
+--rg $dir/UC.sumstats.gz,$dir/NO.sumstats.gz \
+--ref-ld-chr /ngc/projects2/predict_r/research/projects/0007_Genetics_SNP_QC_IMP_PKU_NordIBD/ExternalData/eur_w_ld_chr/ \
+--w-ld-chr /ngc/projects2/predict_r/research/projects/0007_Genetics_SNP_QC_IMP_PKU_NordIBD/ExternalData/eur_w_ld_chr/ \
+--out $OUT/Correlation_UC_NO
+
+ldsc.py \
+--rg $dir/UC.sumstats.gz,$dir/PBC.sumstats.gz \
+--ref-ld-chr /ngc/projects2/predict_r/research/projects/0007_Genetics_SNP_QC_IMP_PKU_NordIBD/ExternalData/eur_w_ld_chr/ \
+--w-ld-chr /ngc/projects2/predict_r/research/projects/0007_Genetics_SNP_QC_IMP_PKU_NordIBD/ExternalData/eur_w_ld_chr/ \
+--out $OUT/Correlation_UC_PBC
+
+ldsc.py \
+--rg $dir/UC.sumstats.gz,$dir/Ps.sumstats.gz \
+--ref-ld-chr /ngc/projects2/predict_r/research/projects/0007_Genetics_SNP_QC_IMP_PKU_NordIBD/ExternalData/eur_w_ld_chr/ \
+--w-ld-chr /ngc/projects2/predict_r/research/projects/0007_Genetics_SNP_QC_IMP_PKU_NordIBD/ExternalData/eur_w_ld_chr/ \
+--out $OUT/Correlation_UC_Ps
+
+ldsc.py \
+--rg $dir/UC.sumstats.gz,$dir/PSC.sumstats.gz \
+--ref-ld-chr /ngc/projects2/predict_r/research/projects/0007_Genetics_SNP_QC_IMP_PKU_NordIBD/ExternalData/eur_w_ld_chr/ \
+--w-ld-chr /ngc/projects2/predict_r/research/projects/0007_Genetics_SNP_QC_IMP_PKU_NordIBD/ExternalData/eur_w_ld_chr/ \
+--out $OUT/Correlation_UC_PSC
+
+ldsc.py \
+--rg $dir/UC.sumstats.gz,$dir/MS.sumstats.gz \
+--ref-ld-chr /ngc/projects2/predict_r/research/projects/0007_Genetics_SNP_QC_IMP_PKU_NordIBD/ExternalData/eur_w_ld_chr/ \
+--w-ld-chr /ngc/projects2/predict_r/research/projects/0007_Genetics_SNP_QC_IMP_PKU_NordIBD/ExternalData/eur_w_ld_chr/ \
+--out $OUT/Correlation_UC_MS
+
+ldsc.py \
+--rg $dir/UC.sumstats.gz,$dir/Iri.sumstats.gz \
+--ref-ld-chr /ngc/projects2/predict_r/research/projects/0007_Genetics_SNP_QC_IMP_PKU_NordIBD/ExternalData/eur_w_ld_chr/ \
+--w-ld-chr /ngc/projects2/predict_r/research/projects/0007_Genetics_SNP_QC_IMP_PKU_NordIBD/ExternalData/eur_w_ld_chr/ \
+--out $OUT/Correlation_UC_Iri
+
+ldsc.py \
+--rg $dir/UC.sumstats.gz,$dir/GD.sumstats.gz \
+--ref-ld-chr /ngc/projects2/predict_r/research/projects/0007_Genetics_SNP_QC_IMP_PKU_NordIBD/ExternalData/eur_w_ld_chr/ \
+--w-ld-chr /ngc/projects2/predict_r/research/projects/0007_Genetics_SNP_QC_IMP_PKU_NordIBD/ExternalData/eur_w_ld_chr/ \
+--out $OUT/Correlation_UC_GD
+
+ldsc.py \
+--rg $dir/UC.sumstats.gz,$dir/Sar.sumstats.gz \
+--ref-ld-chr /ngc/projects2/predict_r/research/projects/0007_Genetics_SNP_QC_IMP_PKU_NordIBD/ExternalData/eur_w_ld_chr/ \
+--w-ld-chr /ngc/projects2/predict_r/research/projects/0007_Genetics_SNP_QC_IMP_PKU_NordIBD/ExternalData/eur_w_ld_chr/ \
+--out $OUT/Correlation_UC_Sar
+
+ldsc.py \
+--rg $dir/UC.sumstats.gz,$dir/MG.sumstats.gz \
+--ref-ld-chr /ngc/projects2/predict_r/research/projects/0007_Genetics_SNP_QC_IMP_PKU_NordIBD/ExternalData/eur_w_ld_chr/ \
+--w-ld-chr /ngc/projects2/predict_r/research/projects/0007_Genetics_SNP_QC_IMP_PKU_NordIBD/ExternalData/eur_w_ld_chr/ \
+--out $OUT/Correlation_UC_MG
+
+ldsc.py \
+--rg $dir/UC.sumstats.gz,$dir/T1D.sumstats.gz \
+--ref-ld-chr /ngc/projects2/predict_r/research/projects/0007_Genetics_SNP_QC_IMP_PKU_NordIBD/ExternalData/eur_w_ld_chr/ \
+--w-ld-chr /ngc/projects2/predict_r/research/projects/0007_Genetics_SNP_QC_IMP_PKU_NordIBD/ExternalData/eur_w_ld_chr/ \
+--out $OUT/Correlation_UC_T1D
+
+```
+
+
+# Take out data:
+```{r}
+path <- "/ngc/projects2/predict_r/research/projects/0015_Genealogy_across_diseases/Generated_Data/SNP_results"
+
+all_data <- c("LE", "NO", "PBC", "Ps", "CD", "UC", "PSC", "MS", "Iri", "GD", "Sar", "MG", "T1D", "SS", "RA", "CeD", "PsA", "AS", "Ast")
+all_data_sub <- all_data[!(all_data %in% c("CD","UC"))]
+
+#Extract all h2 estimations:
+df_h2 <- data.frame()
+
+#Take out for CD:
+df_CD <- read.csv(paste0(path, "/Correlation_CD_UC.log"))
+h2 <- gsub("Total Observed scale h2: ","",df_CD[34,1])
+h2_est <- gsub(" .*", "", h2)
+h2_se <- gsub(".* ", "", h2)
+h2_se <- gsub("[()]", "", h2_se)
+p <- gsub("P: ","",df_CD[55,1])
+df_h2 <- rbind(df_h2, data.frame(Disease ="CD", h2=h2_est, SE=h2_se))
+
+#Loop for the rest:
+for (i in c("UC", all_data_sub)){
+  df <- read.csv(paste0(path, "/Correlation_CD_", i, ".log"))
+  h2 <- gsub("Total Observed scale h2: ","",df[41,1])
+  h2_est <- gsub(" .*", "", h2)
+  h2_se <- gsub(".* ", "", h2)
+  h2_se <- gsub("[()]", "", h2_se)
+  df_h2 <- rbind(df_h2, data.frame(Disease=i, h2=h2_est, SE=h2_se))
+}
+
+#Problems with NO?
+df_h2 <- df_h2 %>% filter(Disease!="NO")
+
+write.table(df_h2, paste0(path, "/SNP_h2_estimated_IMID.txt"), quote=F, row.names = F, col.names = T, sep="\t")
+
+
+#Extract correlation information:
+all_data_sub <- all_data_sub[!(all_data_sub %in% c("NO"))]
+#Correlations with CD:
+df_cor <- data.frame()
+for (i in c("UC", all_data_sub)){
+  df <- read.csv(paste0(path, "/Correlation_CD_", i, ".log"))
+  rg <- gsub("Genetic Correlation: ","",df[53,1])
+  rg_est <- gsub(" .*", "", rg)
+  rg_se <- gsub(".* ", "", rg)
+  rg_se <- gsub("[()]", "", rg_se)
+  p <- gsub("P: ","",df[55,1])
+  df_cor <- rbind(df_cor, data.frame(disease1="CD",disease2=i, rg=rg_est, SE=rg_se, P=p))
+}
+#Add correlations with UC:
+for (i in all_data_sub){
+  df <- read.csv(paste0(path, "/Correlation_UC_", i, ".log"))
+  rg <- gsub("Genetic Correlation: ","",df[53,1])
+  rg_est <- gsub(" .*", "", rg)
+  rg_se <- gsub(".* ", "", rg)
+  rg_se <- gsub("[()]", "", rg_se)
+  p <- gsub("P: ","",df[55,1])
+  df_cor <- rbind(df_cor, data.frame(disease1="UC",disease2=i, rg=rg_est, SE=rg_se, P=p))
+}
+#Problems with GD
+df_cor <- df_cor %>% filter(disease2!="GD")
+
+write.table(df_cor, paste0(path, "/SNP_correlation_estimated_IMIDs.txt"), quote=F, row.names = F, col.names = T, sep="\t")
+```
+
