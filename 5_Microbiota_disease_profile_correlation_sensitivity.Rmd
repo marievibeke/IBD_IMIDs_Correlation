@@ -1,0 +1,1099 @@
+---
+title: "Statistical analysis: Single Genus"
+output:
+  github_document:
+    toc: true
+editor_options:
+  chunk_output_type: console
+---
+
+
+## Read in packages and data
+```{r message=FALSE, warning=FALSE, error=TRUE}
+library(tidyverse)
+library(ggplot2)
+library(dplyr)
+library(phyloseq)
+library(ggpubr)
+library(forestploter)
+library(grid)
+
+packageVersion("tidyverse")
+packageVersion("ggplot2")
+packageVersion("dplyr")
+packageVersion("phyloseq")
+packageVersion("ggpubr")
+
+library(Maaslin2)
+packageVersion("Maaslin2")
+
+path <- "C:/Users/FX76TZ/OneDrive - Aalborg Universitet/Disease correlations/"
+
+predict_col <- c("#4F2641", "#EAE4E3", "#FEF2FA", "#FADBC4", "#FFEAD7", "#FEF5ED",  "#C2C6B5",  "#F7FBED", "#F8F9F3", "#898A87", "#000000", "#E0E1DC", "#FFFFFF")
+accent_col <- c("#CD68AB", "#85416E", "#FF906D", "#FFC498", "#A5BC64", "#B1CD64","#E0F3A6")
+
+hc_col <- accent_col[6]
+cd1_col <- accent_col[1]
+cd2_col <- accent_col[2]
+uc1_col <- accent_col[4]
+uc2_col <- accent_col[3]
+
+```
+
+Load data:
+```{r}
+ps_relab <- readRDS(paste0(path, "Data/ps_relab_sub_5%.rds")) #399 taxa, 2708 samples
+```
+
+## Prepare data for analysis: 
+```{r}
+
+sample_ps <- function(ps, FUN = sample, ...){
+  ids <- sample_names(ps)
+  sampled_ids <- FUN(ids, ...)
+  ps <- prune_samples(sampled_ids, ps)
+  return(ps)
+}
+
+ps_CD <- subset_samples(ps_relab, Disease == "CD")
+sum(sample_data(ps_relab)$Disease == "HC" & sample_data(ps_relab)$BioProject %in% unique(sample_data(ps_CD)$BioProject)) #270 HC and 518 CD -> 270 for analysis
+
+ps_CeD <- subset_samples(ps_relab, Disease == "CeD")
+sum(sample_data(ps_relab)$Disease == "HC" & sample_data(ps_relab)$BioProject %in% unique(sample_data(ps_CeD)$BioProject)) #30 HC and 107 CeD -> 30 for analysis
+
+ps_GD <- subset_samples(ps_relab, Disease == "GD")
+sum(sample_data(ps_relab)$Disease == "HC" & sample_data(ps_relab)$BioProject %in% unique(sample_data(ps_GD)$BioProject)) #100 HC and 143 GD -> 100 for analysis
+
+ps_MG <- subset_samples(ps_relab, Disease == "MG")
+sum(sample_data(ps_relab)$Disease == "HC" & sample_data(ps_relab)$BioProject %in% unique(sample_data(ps_MG)$BioProject)) #86 HC and 111 MG -> 86 for analysis
+
+ps_MS <- subset_samples(ps_relab, Disease == "MS")
+sum(sample_data(ps_relab)$Disease == "HC" & sample_data(ps_relab)$BioProject %in% unique(sample_data(ps_MS)$BioProject)) #47 HC and 92 MS -> 47 for analysis
+
+ps_Ps <- subset_samples(ps_relab, Disease == "Psoriasis")
+sum(sample_data(ps_relab)$Disease == "HC" & sample_data(ps_relab)$BioProject %in% unique(sample_data(ps_Ps)$BioProject)) #67 HC and 99 Ps -> 67 for analysis
+
+ps_RA <- subset_samples(ps_relab, Disease == "RA")
+sum(sample_data(ps_relab)$Disease == "HC" & sample_data(ps_relab)$BioProject %in% unique(sample_data(ps_RA)$BioProject)) #121 HC and 247 RA -> 121 for analysis
+
+ps_SLE <- subset_samples(ps_relab, Disease == "SLE")
+sum(sample_data(ps_relab)$Disease == "HC" & sample_data(ps_relab)$BioProject %in% unique(sample_data(ps_SLE)$BioProject)) #42 HC and 107 SLE -> 42 for analysis
+
+ps_T1D <- subset_samples(ps_relab, Disease == "T1D")
+sum(sample_data(ps_relab)$Disease == "HC" & sample_data(ps_relab)$BioProject %in% unique(sample_data(ps_T1D)$BioProject)) #56 HC and 141 T1D -> 56 for analysis
+
+ps_UC <- subset_samples(ps_relab, Disease == "UC")
+sum(sample_data(ps_relab)$Disease == "HC" & sample_data(ps_relab)$BioProject %in% unique(sample_data(ps_UC)$BioProject)) #185 HC and 226 UC -> 185 for analysis
+
+```
+
+
+### MaAsLin2:
+```{r}
+#For CD-UC: downsample to 185
+set.seed(1)
+ps_sub1 <- sample_ps(ps_CD, size=185)
+ps_sub2 <- subset_samples(ps_relab, Disease=="HC" & BioProject %in% sample_data(ps_CD)$BioProject)
+ps_sub2 <- sample_ps(ps_sub2, size=185)
+
+ps_sub <- subset_samples(ps_relab, Run %in% c(sample_data(ps_sub1)$Run, sample_data(ps_sub2)$Run))
+
+input_data <- as.data.frame(as.matrix(otu_table(ps_sub)))
+input_metadata <- as.data.frame(as.matrix(sample_data(ps_sub)))
+
+table(input_metadata$Instrument)
+table(input_metadata$Continent)
+
+setwd(paste0(path, "Results/"))
+fit_data = Maaslin2(
+    input_data = input_data, 
+    input_metadata = input_metadata, 
+    output = "CD_n185", 
+    max_significance = 1,
+    min_prevalence = 0,
+    transform = "AST",
+    normalization = "None",
+    fixed_effects = c("Disease","Instrument", "Continent"), reference = c("Disease,HC", "Instrument,Illumina MiSeq", "Continent,Asia"),
+    plot_heatmap = F, plot_scatter = F)
+
+res <- read.csv("CD_n185/all_results.tsv", sep="\t")
+res <- res %>% filter(metadata == "Disease")
+head(res)
+
+write.table(res, paste0(path, "Results/CD_n185.txt"), col.names=T, row.names=F)
+
+set.seed(1)
+ps_sub1 <- sample_ps(ps_UC, size=185)
+ps_sub2 <- subset_samples(ps_relab, Disease=="HC" & BioProject %in% sample_data(ps_UC)$BioProject)
+
+ps_sub <- subset_samples(ps_relab, Run %in% c(sample_data(ps_sub1)$Run, sample_data(ps_sub2)$Run))
+
+input_data <- as.data.frame(as.matrix(otu_table(ps_sub)))
+input_metadata <- as.data.frame(as.matrix(sample_data(ps_sub)))
+
+table(input_metadata$Instrument)
+table(input_metadata$Continent)
+
+setwd(paste0(path, "Results/"))
+fit_data = Maaslin2(
+    input_data = input_data, 
+    input_metadata = input_metadata, 
+    output = "UC_n185", 
+    max_significance = 1,
+    min_prevalence = 0,
+    transform = "AST",
+    normalization = "None",
+    fixed_effects = c("Disease", "Continent"), reference = c("Disease,HC", "Continent,Asia"),
+    plot_heatmap = F, plot_scatter = F)
+
+res <- read.csv("UC_n185/all_results.tsv", sep="\t")
+res <- res %>% filter(metadata == "Disease")
+head(res)
+
+write.table(res, paste0(path, "Results/UC_n185.txt"), col.names=T, row.names=F)
+
+```
+
+Correlation with CeD: Downsample to 30
+```{r}
+set.seed(1)
+ps_sub1 <- sample_ps(ps_CD, size=30)
+ps_sub2 <- subset_samples(ps_relab, Disease=="HC" & BioProject %in% sample_data(ps_CD)$BioProject)
+ps_sub2 <- sample_ps(ps_sub2, size=30)
+
+ps_sub <- subset_samples(ps_relab, Run %in% c(sample_data(ps_sub1)$Run, sample_data(ps_sub2)$Run))
+
+input_data <- as.data.frame(as.matrix(otu_table(ps_sub)))
+input_metadata <- as.data.frame(as.matrix(sample_data(ps_sub)))
+
+table(input_metadata$Instrument)
+table(input_metadata$Continent)
+
+setwd(paste0(path, "Results/"))
+fit_data = Maaslin2(
+    input_data = input_data, 
+    input_metadata = input_metadata, 
+    output = "CD_n30_2", 
+    max_significance = 1,
+    min_prevalence = 0,
+    transform = "AST",
+    normalization = "None",
+    fixed_effects = c("Disease", "Continent"), reference = c("Disease,HC",  "Continent,Asia"),
+    plot_heatmap = F, plot_scatter = F)
+
+res <- read.csv("CD_n30_2/all_results.tsv", sep="\t")
+res <- res %>% filter(metadata == "Disease")
+head(res)
+
+write.table(res, paste0(path, "Results/CD_n30_2.txt"), col.names=T, row.names=F)
+
+set.seed(1)
+ps_sub1 <- sample_ps(ps_UC, size=30)
+ps_sub2 <- subset_samples(ps_relab, Disease=="HC" & BioProject %in% sample_data(ps_UC)$BioProject)
+ps_sub2 <- sample_ps(ps_sub2, size=30)
+
+ps_sub <- subset_samples(ps_relab, Run %in% c(sample_data(ps_sub1)$Run, sample_data(ps_sub2)$Run))
+
+input_data <- as.data.frame(as.matrix(otu_table(ps_sub)))
+input_metadata <- as.data.frame(as.matrix(sample_data(ps_sub)))
+
+table(input_metadata$Instrument)
+table(input_metadata$Continent)
+
+setwd(paste0(path, "Results/"))
+fit_data = Maaslin2(
+    input_data = input_data, 
+    input_metadata = input_metadata, 
+    output = "UC_n30_2", 
+    max_significance = 1,
+    min_prevalence = 0,
+    transform = "AST",
+    normalization = "None",
+    fixed_effects = c("Disease", "Continent"), reference = c("Disease,HC",  "Continent,Asia"),
+    plot_heatmap = F, plot_scatter = F)
+
+res <- read.csv("UC_n30_2/all_results.tsv", sep="\t")
+res <- res %>% filter(metadata == "Disease")
+head(res)
+
+write.table(res, paste0(path, "Results/UC_n30_2.txt"), col.names=T, row.names=F)
+
+set.seed(1)
+ps_sub1 <- sample_ps(ps_CeD, size=30)
+ps_sub2 <- subset_samples(ps_relab, Disease=="HC" & BioProject %in% sample_data(ps_CeD)$BioProject)
+
+ps_sub <- subset_samples(ps_relab, Run %in% c(sample_data(ps_sub1)$Run, sample_data(ps_sub2)$Run))
+
+input_data <- as.data.frame(as.matrix(otu_table(ps_sub)))
+input_metadata <- as.data.frame(as.matrix(sample_data(ps_sub)))
+
+table(input_metadata$Instrument)
+table(input_metadata$Continent)
+
+setwd(paste0(path, "Results/"))
+fit_data = Maaslin2(
+    input_data = input_data, 
+    input_metadata = input_metadata, 
+    output = "CeD_n30_2", 
+    max_significance = 1,
+    min_prevalence = 0,
+    transform = "AST",
+    normalization = "None",
+    fixed_effects = c("Disease", "Continent", "Instrument"), reference = c("Disease,HC",  "Continent,Asia", "Instrument,Illumina MiSeq"),
+    plot_heatmap = F, plot_scatter = F)
+
+res <- read.csv("CeD_n30_2/all_results.tsv", sep="\t")
+res <- res %>% filter(metadata == "Disease")
+head(res)
+
+write.table(res, paste0(path, "Results/CeD_n30_2.txt"), col.names=T, row.names=F)
+```
+
+Correlation with GD: Downsample to 100
+```{r}
+set.seed(1)
+ps_sub1 <- sample_ps(ps_CD, size=100)
+ps_sub2 <- subset_samples(ps_relab, Disease=="HC" & BioProject %in% sample_data(ps_CD)$BioProject)
+ps_sub2 <- sample_ps(ps_sub2, size=100)
+
+ps_sub <- subset_samples(ps_relab, Run %in% c(sample_data(ps_sub1)$Run, sample_data(ps_sub2)$Run))
+
+input_data <- as.data.frame(as.matrix(otu_table(ps_sub)))
+input_metadata <- as.data.frame(as.matrix(sample_data(ps_sub)))
+
+table(input_metadata$Instrument)
+table(input_metadata$Continent)
+
+setwd(paste0(path, "Results/"))
+fit_data = Maaslin2(
+    input_data = input_data, 
+    input_metadata = input_metadata, 
+    output = "CD_n100", 
+    max_significance = 1,
+    min_prevalence = 0,
+    transform = "AST",
+    normalization = "None",
+    fixed_effects = c("Disease", "Continent", "Instrument"), reference = c("Disease,HC",  "Continent,Asia", "Instrument,Illumina MiSeq"),
+    plot_heatmap = F, plot_scatter = F)
+
+res <- read.csv("CD_n100/all_results.tsv", sep="\t")
+res <- res %>% filter(metadata == "Disease")
+head(res)
+
+write.table(res, paste0(path, "Results/CD_n100.txt"), col.names=T, row.names=F)
+
+set.seed(1)
+ps_sub1 <- sample_ps(ps_UC, size=100)
+ps_sub2 <- subset_samples(ps_relab, Disease=="HC" & BioProject %in% sample_data(ps_UC)$BioProject)
+ps_sub2 <- sample_ps(ps_sub2, size=100)
+
+ps_sub <- subset_samples(ps_relab, Run %in% c(sample_data(ps_sub1)$Run, sample_data(ps_sub2)$Run))
+
+input_data <- as.data.frame(as.matrix(otu_table(ps_sub)))
+input_metadata <- as.data.frame(as.matrix(sample_data(ps_sub)))
+
+table(input_metadata$Instrument)
+table(input_metadata$Continent)
+
+setwd(paste0(path, "Results/"))
+fit_data = Maaslin2(
+    input_data = input_data, 
+    input_metadata = input_metadata, 
+    output = "UC_n100", 
+    max_significance = 1,
+    min_prevalence = 0,
+    transform = "AST",
+    normalization = "None",
+    fixed_effects = c("Disease", "Continent"), reference = c("Disease,HC",  "Continent,Asia"),
+    plot_heatmap = F, plot_scatter = F)
+
+res <- read.csv("UC_n100/all_results.tsv", sep="\t")
+res <- res %>% filter(metadata == "Disease")
+head(res)
+
+write.table(res, paste0(path, "Results/UC_n100.txt"), col.names=T, row.names=F)
+
+set.seed(1)
+ps_sub1 <- sample_ps(ps_GD, size=100)
+ps_sub2 <- subset_samples(ps_relab, Disease=="HC" & BioProject %in% sample_data(ps_GD)$BioProject)
+
+ps_sub <- subset_samples(ps_relab, Run %in% c(sample_data(ps_sub1)$Run, sample_data(ps_sub2)$Run))
+
+input_data <- as.data.frame(as.matrix(otu_table(ps_sub)))
+input_metadata <- as.data.frame(as.matrix(sample_data(ps_sub)))
+
+table(input_metadata$Instrument)
+table(input_metadata$Continent)
+
+setwd(paste0(path, "Results/"))
+fit_data = Maaslin2(
+    input_data = input_data, 
+    input_metadata = input_metadata, 
+    output = "GD_n100", 
+    max_significance = 1,
+    min_prevalence = 0,
+    transform = "AST",
+    normalization = "None",
+    fixed_effects = c("Disease"), reference = c("Disease,HC"),
+    plot_heatmap = F, plot_scatter = F)
+
+res <- read.csv("GD_n100/all_results.tsv", sep="\t")
+res <- res %>% filter(metadata == "Disease")
+head(res)
+
+write.table(res, paste0(path, "Results/GD_n100.txt"), col.names=T, row.names=F)
+```
+
+Correlation with MG: Downsample to 86
+```{r}
+set.seed(1)
+ps_sub1 <- sample_ps(ps_CD, size=86)
+ps_sub2 <- subset_samples(ps_relab, Disease=="HC" & BioProject %in% sample_data(ps_CD)$BioProject)
+ps_sub2 <- sample_ps(ps_sub2, size=86)
+
+ps_sub <- subset_samples(ps_relab, Run %in% c(sample_data(ps_sub1)$Run, sample_data(ps_sub2)$Run))
+
+input_data <- as.data.frame(as.matrix(otu_table(ps_sub)))
+input_metadata <- as.data.frame(as.matrix(sample_data(ps_sub)))
+
+table(input_metadata$Instrument)
+table(input_metadata$Continent)
+
+setwd(paste0(path, "Results/"))
+fit_data = Maaslin2(
+    input_data = input_data, 
+    input_metadata = input_metadata, 
+    output = "CD_n86", 
+    max_significance = 1,
+    min_prevalence = 0,
+    transform = "AST",
+    normalization = "None",
+    fixed_effects = c("Disease", "Continent", "Instrument"), reference = c("Disease,HC",  "Continent,Asia", "Instrument,Illumina MiSeq"),
+    plot_heatmap = F, plot_scatter = F)
+
+res <- read.csv("CD_n86/all_results.tsv", sep="\t")
+res <- res %>% filter(metadata == "Disease")
+head(res)
+
+write.table(res, paste0(path, "Results/CD_n86.txt"), col.names=T, row.names=F)
+
+
+set.seed(1)
+ps_sub1 <- sample_ps(ps_UC, size=86)
+ps_sub2 <- subset_samples(ps_relab, Disease=="HC" & BioProject %in% sample_data(ps_UC)$BioProject)
+ps_sub2 <- sample_ps(ps_sub2, size=86)
+
+ps_sub <- subset_samples(ps_relab, Run %in% c(sample_data(ps_sub1)$Run, sample_data(ps_sub2)$Run))
+
+input_data <- as.data.frame(as.matrix(otu_table(ps_sub)))
+input_metadata <- as.data.frame(as.matrix(sample_data(ps_sub)))
+
+table(input_metadata$Instrument)
+table(input_metadata$Continent)
+
+setwd(paste0(path, "Results/"))
+fit_data = Maaslin2(
+    input_data = input_data, 
+    input_metadata = input_metadata, 
+    output = "UC_n86", 
+    max_significance = 1,
+    min_prevalence = 0,
+    transform = "AST",
+    normalization = "None",
+    fixed_effects = c("Disease", "Continent"), reference = c("Disease,HC",  "Continent,Asia"),
+    plot_heatmap = F, plot_scatter = F)
+
+res <- read.csv("UC_n86/all_results.tsv", sep="\t")
+res <- res %>% filter(metadata == "Disease")
+head(res)
+
+write.table(res, paste0(path, "Results/UC_n86.txt"), col.names=T, row.names=F)
+
+set.seed(1)
+ps_sub1 <- sample_ps(ps_MG, size=86)
+ps_sub2 <- subset_samples(ps_relab, Disease=="HC" & BioProject %in% sample_data(ps_MG)$BioProject)
+
+ps_sub <- subset_samples(ps_relab, Run %in% c(sample_data(ps_sub1)$Run, sample_data(ps_sub2)$Run))
+
+input_data <- as.data.frame(as.matrix(otu_table(ps_sub)))
+input_metadata <- as.data.frame(as.matrix(sample_data(ps_sub)))
+
+table(input_metadata$Instrument)
+table(input_metadata$Continent)
+
+setwd(paste0(path, "Results/"))
+fit_data = Maaslin2(
+    input_data = input_data, 
+    input_metadata = input_metadata, 
+    output = "MG_n86", 
+    max_significance = 1,
+    min_prevalence = 0,
+    transform = "AST",
+    normalization = "None",
+    fixed_effects = c("Disease", "Continent"), reference = c("Disease,HC",  "Continent,Asia"),
+    plot_heatmap = F, plot_scatter = F)
+
+res <- read.csv("MG_n86/all_results.tsv", sep="\t")
+res <- res %>% filter(metadata == "Disease")
+head(res)
+
+write.table(res, paste0(path, "Results/MG_n86.txt"), col.names=T, row.names=F)
+```
+
+Correlation with MS: Downsample to 47
+```{r}
+set.seed(1)
+ps_sub1 <- sample_ps(ps_CD, size=47)
+ps_sub2 <- subset_samples(ps_relab, Disease=="HC" & BioProject %in% sample_data(ps_CD)$BioProject)
+ps_sub2 <- sample_ps(ps_sub2, size=47)
+
+ps_sub <- subset_samples(ps_relab, Run %in% c(sample_data(ps_sub1)$Run, sample_data(ps_sub2)$Run))
+
+input_data <- as.data.frame(as.matrix(otu_table(ps_sub)))
+input_metadata <- as.data.frame(as.matrix(sample_data(ps_sub)))
+
+table(input_metadata$Instrument)
+table(input_metadata$Continent)
+
+setwd(paste0(path, "Results/"))
+fit_data = Maaslin2(
+    input_data = input_data, 
+    input_metadata = input_metadata, 
+    output = "CD_n47", 
+    max_significance = 1,
+    min_prevalence = 0,
+    transform = "AST",
+    normalization = "None",
+    fixed_effects = c("Disease", "Continent", "Instrument"), reference = c("Disease,HC",  "Continent,Asia", "Instrument,Illumina MiSeq"),
+    plot_heatmap = F, plot_scatter = F)
+
+res <- read.csv("CD_n47/all_results.tsv", sep="\t")
+res <- res %>% filter(metadata == "Disease")
+head(res)
+
+write.table(res, paste0(path, "Results/CD_n47.txt"), col.names=T, row.names=F)
+
+set.seed(1)
+ps_sub1 <- sample_ps(ps_UC, size=47)
+ps_sub2 <- subset_samples(ps_relab, Disease=="HC" & BioProject %in% sample_data(ps_UC)$BioProject)
+ps_sub2 <- sample_ps(ps_sub2, size=47)
+
+ps_sub <- subset_samples(ps_relab, Run %in% c(sample_data(ps_sub1)$Run, sample_data(ps_sub2)$Run))
+
+input_data <- as.data.frame(as.matrix(otu_table(ps_sub)))
+input_metadata <- as.data.frame(as.matrix(sample_data(ps_sub)))
+
+table(input_metadata$Instrument)
+table(input_metadata$Continent)
+
+setwd(paste0(path, "Results/"))
+fit_data = Maaslin2(
+    input_data = input_data, 
+    input_metadata = input_metadata, 
+    output = "UC_n47", 
+    max_significance = 1,
+    min_prevalence = 0,
+    transform = "AST",
+    normalization = "None",
+    fixed_effects = c("Disease", "Continent"), reference = c("Disease,HC",  "Continent,Asia"),
+    plot_heatmap = F, plot_scatter = F)
+
+res <- read.csv("UC_n47/all_results.tsv", sep="\t")
+res <- res %>% filter(metadata == "Disease")
+head(res)
+
+write.table(res, paste0(path, "Results/UC_n47.txt"), col.names=T, row.names=F)
+
+set.seed(1)
+ps_sub1 <- sample_ps(ps_MS, size=47)
+ps_sub2 <- subset_samples(ps_relab, Disease=="HC" & BioProject %in% sample_data(ps_MS)$BioProject)
+
+ps_sub <- subset_samples(ps_relab, Run %in% c(sample_data(ps_sub1)$Run, sample_data(ps_sub2)$Run))
+
+input_data <- as.data.frame(as.matrix(otu_table(ps_sub)))
+input_metadata <- as.data.frame(as.matrix(sample_data(ps_sub)))
+
+table(input_metadata$Instrument)
+table(input_metadata$Continent)
+
+setwd(paste0(path, "Results/"))
+fit_data = Maaslin2(
+    input_data = input_data, 
+    input_metadata = input_metadata, 
+    output = "MS_n47", 
+    max_significance = 1,
+    min_prevalence = 0,
+    transform = "AST",
+    normalization = "None",
+    fixed_effects = c("Disease", "Continent"), reference = c("Disease,HC",  "Continent,Asia"),
+    plot_heatmap = F, plot_scatter = F)
+
+res <- read.csv("MS_n47/all_results.tsv", sep="\t")
+res <- res %>% filter(metadata == "Disease")
+head(res)
+
+write.table(res, paste0(path, "Results/MS_n47.txt"), col.names=T, row.names=F)
+```
+
+Correlation with Ps: Downsample Ps to 67
+```{r}
+set.seed(1)
+ps_sub1 <- sample_ps(ps_CD, size=67)
+ps_sub2 <- subset_samples(ps_relab, Disease=="HC" & BioProject %in% sample_data(ps_CD)$BioProject)
+ps_sub2 <- sample_ps(ps_sub2, size=67)
+
+ps_sub <- subset_samples(ps_relab, Run %in% c(sample_data(ps_sub1)$Run, sample_data(ps_sub2)$Run))
+
+input_data <- as.data.frame(as.matrix(otu_table(ps_sub)))
+input_metadata <- as.data.frame(as.matrix(sample_data(ps_sub)))
+
+table(input_metadata$Instrument)
+table(input_metadata$Continent)
+
+setwd(paste0(path, "Results/"))
+fit_data = Maaslin2(
+    input_data = input_data, 
+    input_metadata = input_metadata, 
+    output = "CD_n67", 
+    max_significance = 1,
+    min_prevalence = 0,
+    transform = "AST",
+    normalization = "None",
+    fixed_effects = c("Disease", "Continent", "Instrument"), reference = c("Disease,HC",  "Continent,Asia", "Instrument,Illumina MiSeq"),
+    plot_heatmap = F, plot_scatter = F)
+
+res <- read.csv("CD_n67/all_results.tsv", sep="\t")
+res <- res %>% filter(metadata == "Disease")
+head(res)
+
+write.table(res, paste0(path, "Results/CD_n67.txt"), col.names=T, row.names=F)
+
+set.seed(1)
+ps_sub1 <- sample_ps(ps_UC, size=67)
+ps_sub2 <- subset_samples(ps_relab, Disease=="HC" & BioProject %in% sample_data(ps_UC)$BioProject)
+ps_sub2 <- sample_ps(ps_sub2, size=67)
+
+ps_sub <- subset_samples(ps_relab, Run %in% c(sample_data(ps_sub1)$Run, sample_data(ps_sub2)$Run))
+
+input_data <- as.data.frame(as.matrix(otu_table(ps_sub)))
+input_metadata <- as.data.frame(as.matrix(sample_data(ps_sub)))
+
+table(input_metadata$Instrument)
+table(input_metadata$Continent)
+
+setwd(paste0(path, "Results/"))
+fit_data = Maaslin2(
+    input_data = input_data, 
+    input_metadata = input_metadata, 
+    output = "UC_n67", 
+    max_significance = 1,
+    min_prevalence = 0,
+    transform = "AST",
+    normalization = "None",
+    fixed_effects = c("Disease", "Continent"), reference = c("Disease,HC",  "Continent,Asia"),
+    plot_heatmap = F, plot_scatter = F)
+
+res <- read.csv("UC_n67/all_results.tsv", sep="\t")
+res <- res %>% filter(metadata == "Disease")
+head(res)
+
+write.table(res, paste0(path, "Results/UC_n67.txt"), col.names=T, row.names=F)
+
+set.seed(1)
+ps_sub1 <- sample_ps(ps_Ps, size=67)
+ps_sub2 <- subset_samples(ps_relab, Disease=="HC" & BioProject %in% sample_data(ps_Ps)$BioProject)
+
+ps_sub <- subset_samples(ps_relab, Run %in% c(sample_data(ps_sub1)$Run, sample_data(ps_sub2)$Run))
+
+input_data <- as.data.frame(as.matrix(otu_table(ps_sub)))
+input_metadata <- as.data.frame(as.matrix(sample_data(ps_sub)))
+
+table(input_metadata$Instrument)
+table(input_metadata$Continent)
+
+setwd(paste0(path, "Results/"))
+fit_data = Maaslin2(
+    input_data = input_data, 
+    input_metadata = input_metadata, 
+    output = "Ps_n67", 
+    max_significance = 1,
+    min_prevalence = 0,
+    transform = "AST",
+    normalization = "None",
+    fixed_effects = c("Disease", "Continent", "Instrument"), reference = c("Disease,HC",  "Continent,Asia", "Instrument,Illumina MiSeq"),
+    plot_heatmap = F, plot_scatter = F)
+
+res <- read.csv("Ps_n67/all_results.tsv", sep="\t")
+res <- res %>% filter(metadata == "Disease")
+head(res)
+
+write.table(res, paste0(path, "Results/Ps_n67.txt"), col.names=T, row.names=F)
+```
+
+Correlation with RA: Downsample RA to 121
+```{r}
+set.seed(1)
+ps_sub1 <- sample_ps(ps_CD, size=121)
+ps_sub2 <- subset_samples(ps_relab, Disease=="HC" & BioProject %in% sample_data(ps_CD)$BioProject)
+ps_sub2 <- sample_ps(ps_sub2, size=121)
+
+ps_sub <- subset_samples(ps_relab, Run %in% c(sample_data(ps_sub1)$Run, sample_data(ps_sub2)$Run))
+
+input_data <- as.data.frame(as.matrix(otu_table(ps_sub)))
+input_metadata <- as.data.frame(as.matrix(sample_data(ps_sub)))
+
+table(input_metadata$Instrument)
+table(input_metadata$Continent)
+
+setwd(paste0(path, "Results/"))
+fit_data = Maaslin2(
+    input_data = input_data, 
+    input_metadata = input_metadata, 
+    output = "CD_n121", 
+    max_significance = 1,
+    min_prevalence = 0,
+    transform = "AST",
+    normalization = "None",
+    fixed_effects = c("Disease", "Continent", "Instrument"), reference = c("Disease,HC",  "Continent,Asia", "Instrument,Illumina MiSeq"),
+    plot_heatmap = F, plot_scatter = F)
+
+res <- read.csv("CD_n121/all_results.tsv", sep="\t")
+res <- res %>% filter(metadata == "Disease")
+head(res)
+
+write.table(res, paste0(path, "Results/CD_n121.txt"), col.names=T, row.names=F)
+
+set.seed(1)
+ps_sub1 <- sample_ps(ps_UC, size=121)
+ps_sub2 <- subset_samples(ps_relab, Disease=="HC" & BioProject %in% sample_data(ps_UC)$BioProject)
+ps_sub2 <- sample_ps(ps_sub2, size=121)
+
+ps_sub <- subset_samples(ps_relab, Run %in% c(sample_data(ps_sub1)$Run, sample_data(ps_sub2)$Run))
+
+input_data <- as.data.frame(as.matrix(otu_table(ps_sub)))
+input_metadata <- as.data.frame(as.matrix(sample_data(ps_sub)))
+
+table(input_metadata$Instrument)
+table(input_metadata$Continent)
+
+setwd(paste0(path, "Results/"))
+fit_data = Maaslin2(
+    input_data = input_data, 
+    input_metadata = input_metadata, 
+    output = "UC_n121", 
+    max_significance = 1,
+    min_prevalence = 0,
+    transform = "AST",
+    normalization = "None",
+    fixed_effects = c("Disease", "Continent"), reference = c("Disease,HC",  "Continent,Asia"),
+    plot_heatmap = F, plot_scatter = F)
+
+res <- read.csv("UC_n121/all_results.tsv", sep="\t")
+res <- res %>% filter(metadata == "Disease")
+head(res)
+
+write.table(res, paste0(path, "Results/UC_n121.txt"), col.names=T, row.names=F)
+
+set.seed(1)
+ps_sub1 <- sample_ps(ps_RA, size=121)
+ps_sub2 <- subset_samples(ps_relab, Disease=="HC" & BioProject %in% sample_data(ps_RA)$BioProject)
+
+ps_sub <- subset_samples(ps_relab, Run %in% c(sample_data(ps_sub1)$Run, sample_data(ps_sub2)$Run))
+
+input_data <- as.data.frame(as.matrix(otu_table(ps_sub)))
+input_metadata <- as.data.frame(as.matrix(sample_data(ps_sub)))
+
+table(input_metadata$Instrument)
+table(input_metadata$Continent)
+
+setwd(paste0(path, "Results/"))
+fit_data = Maaslin2(
+    input_data = input_data, 
+    input_metadata = input_metadata, 
+    output = "RA_n121", 
+    max_significance = 1,
+    min_prevalence = 0,
+    transform = "AST",
+    normalization = "None",
+    fixed_effects = c("Disease", "Continent", "Instrument"), reference = c("Disease,HC",  "Continent,Asia", "Instrument,Illumina MiSeq"),
+    plot_heatmap = F, plot_scatter = F)
+
+res <- read.csv("RA_n121/all_results.tsv", sep="\t")
+res <- res %>% filter(metadata == "Disease")
+head(res)
+
+write.table(res, paste0(path, "Results/RA_n121.txt"), col.names=T, row.names=F)
+```
+
+Correlation with SLE: Downsample to 42
+```{r}
+set.seed(1)
+ps_sub1 <- sample_ps(ps_CD, size=42)
+ps_sub2 <- subset_samples(ps_relab, Disease=="HC" & BioProject %in% sample_data(ps_CD)$BioProject)
+ps_sub2 <- sample_ps(ps_sub2, size=42)
+
+ps_sub <- subset_samples(ps_relab, Run %in% c(sample_data(ps_sub1)$Run, sample_data(ps_sub2)$Run))
+
+input_data <- as.data.frame(as.matrix(otu_table(ps_sub)))
+input_metadata <- as.data.frame(as.matrix(sample_data(ps_sub)))
+
+table(input_metadata$Instrument)
+table(input_metadata$Continent)
+
+setwd(paste0(path, "Results/"))
+fit_data = Maaslin2(
+    input_data = input_data, 
+    input_metadata = input_metadata, 
+    output = "CD_n42", 
+    max_significance = 1,
+    min_prevalence = 0,
+    transform = "AST",
+    normalization = "None",
+    fixed_effects = c("Disease", "Continent"), reference = c("Disease,HC",  "Continent,Asia"),
+    plot_heatmap = F, plot_scatter = F)
+
+res <- read.csv("CD_n42/all_results.tsv", sep="\t")
+res <- res %>% filter(metadata == "Disease")
+head(res)
+
+write.table(res, paste0(path, "Results/CD_n42.txt"), col.names=T, row.names=F)
+
+set.seed(1)
+ps_sub1 <- sample_ps(ps_UC, size=42)
+ps_sub2 <- subset_samples(ps_relab, Disease=="HC" & BioProject %in% sample_data(ps_UC)$BioProject)
+ps_sub2 <- sample_ps(ps_sub2, size=42)
+
+ps_sub <- subset_samples(ps_relab, Run %in% c(sample_data(ps_sub1)$Run, sample_data(ps_sub2)$Run))
+
+input_data <- as.data.frame(as.matrix(otu_table(ps_sub)))
+input_metadata <- as.data.frame(as.matrix(sample_data(ps_sub)))
+
+table(input_metadata$Instrument)
+table(input_metadata$Continent)
+
+setwd(paste0(path, "Results/"))
+fit_data = Maaslin2(
+    input_data = input_data, 
+    input_metadata = input_metadata, 
+    output = "UC_n42", 
+    max_significance = 1,
+    min_prevalence = 0,
+    transform = "AST",
+    normalization = "None",
+    fixed_effects = c("Disease", "Continent"), reference = c("Disease,HC",  "Continent,Asia"),
+    plot_heatmap = F, plot_scatter = F)
+
+res <- read.csv("UC_n42/all_results.tsv", sep="\t")
+res <- res %>% filter(metadata == "Disease")
+head(res)
+
+write.table(res, paste0(path, "Results/UC_n42.txt"), col.names=T, row.names=F)
+
+set.seed(1)
+ps_sub1 <- sample_ps(ps_SLE, size=42)
+ps_sub2 <- subset_samples(ps_relab, Disease=="HC" & BioProject %in% sample_data(ps_SLE)$BioProject)
+
+ps_sub <- subset_samples(ps_relab, Run %in% c(sample_data(ps_sub1)$Run, sample_data(ps_sub2)$Run))
+
+input_data <- as.data.frame(as.matrix(otu_table(ps_sub)))
+input_metadata <- as.data.frame(as.matrix(sample_data(ps_sub)))
+
+table(input_metadata$Instrument)
+table(input_metadata$Continent)
+
+setwd(paste0(path, "Results/"))
+fit_data = Maaslin2(
+    input_data = input_data, 
+    input_metadata = input_metadata, 
+    output = "SLE_n42", 
+    max_significance = 1,
+    min_prevalence = 0,
+    transform = "AST",
+    normalization = "None",
+    fixed_effects = c("Disease", "Continent", "Instrument"), reference = c("Disease,HC",  "Continent,Asia", "Instrument,Illumina MiSeq"),
+    plot_heatmap = F, plot_scatter = F)
+
+res <- read.csv("SLE_n42/all_results.tsv", sep="\t")
+res <- res %>% filter(metadata == "Disease")
+head(res)
+
+write.table(res, paste0(path, "Results/SLE_n42.txt"), col.names=T, row.names=F)
+```
+
+Correlation with T1D: Downsample to 56
+```{r}
+set.seed(1)
+ps_sub1 <- sample_ps(ps_CD, size=56)
+ps_sub2 <- subset_samples(ps_relab, Disease=="HC" & BioProject %in% sample_data(ps_CD)$BioProject)
+ps_sub2 <- sample_ps(ps_sub2, size=56)
+
+ps_sub <- subset_samples(ps_relab, Run %in% c(sample_data(ps_sub1)$Run, sample_data(ps_sub2)$Run))
+
+input_data <- as.data.frame(as.matrix(otu_table(ps_sub)))
+input_metadata <- as.data.frame(as.matrix(sample_data(ps_sub)))
+
+table(input_metadata$Instrument)
+table(input_metadata$Continent)
+
+setwd(paste0(path, "Results/"))
+fit_data = Maaslin2(
+    input_data = input_data, 
+    input_metadata = input_metadata, 
+    output = "CD_n56", 
+    max_significance = 1,
+    min_prevalence = 0,
+    transform = "AST",
+    normalization = "None",
+    fixed_effects = c("Disease", "Continent","Instrument"), reference = c("Disease,HC",  "Continent,Asia", "Instrument,Illumina MiSeq"),
+    plot_heatmap = F, plot_scatter = F)
+
+res <- read.csv("CD_n56/all_results.tsv", sep="\t")
+res <- res %>% filter(metadata == "Disease")
+head(res)
+
+write.table(res, paste0(path, "Results/CD_n56.txt"), col.names=T, row.names=F)
+
+set.seed(1)
+ps_sub1 <- sample_ps(ps_UC, size=56)
+ps_sub2 <- subset_samples(ps_relab, Disease=="HC" & BioProject %in% sample_data(ps_UC)$BioProject)
+ps_sub2 <- sample_ps(ps_sub2, size=56)
+
+ps_sub <- subset_samples(ps_relab, Run %in% c(sample_data(ps_sub1)$Run, sample_data(ps_sub2)$Run))
+
+input_data <- as.data.frame(as.matrix(otu_table(ps_sub)))
+input_metadata <- as.data.frame(as.matrix(sample_data(ps_sub)))
+
+table(input_metadata$Instrument)
+table(input_metadata$Continent)
+
+setwd(paste0(path, "Results/"))
+fit_data = Maaslin2(
+    input_data = input_data, 
+    input_metadata = input_metadata, 
+    output = "UC_n56", 
+    max_significance = 1,
+    min_prevalence = 0,
+    transform = "AST",
+    normalization = "None",
+    fixed_effects = c("Disease", "Continent"), reference = c("Disease,HC",  "Continent,Asia"),
+    plot_heatmap = F, plot_scatter = F)
+
+res <- read.csv("UC_n56/all_results.tsv", sep="\t")
+res <- res %>% filter(metadata == "Disease")
+head(res)
+
+write.table(res, paste0(path, "Results/UC_n56.txt"), col.names=T, row.names=F)
+
+set.seed(1)
+ps_sub1 <- sample_ps(ps_T1D, size=56)
+ps_sub2 <- subset_samples(ps_relab, Disease=="HC" & BioProject %in% sample_data(ps_T1D)$BioProject)
+
+ps_sub <- subset_samples(ps_relab, Run %in% c(sample_data(ps_sub1)$Run, sample_data(ps_sub2)$Run))
+
+input_data <- as.data.frame(as.matrix(otu_table(ps_sub)))
+input_metadata <- as.data.frame(as.matrix(sample_data(ps_sub)))
+
+table(input_metadata$Instrument)
+table(input_metadata$Continent)
+
+setwd(paste0(path, "Results/"))
+fit_data = Maaslin2(
+    input_data = input_data, 
+    input_metadata = input_metadata, 
+    output = "T1D_n56", 
+    max_significance = 1,
+    min_prevalence = 0,
+    transform = "AST",
+    normalization = "None",
+    fixed_effects = c("Disease", "Continent"), reference = c("Disease,HC",  "Continent,Asia"),
+    plot_heatmap = F, plot_scatter = F)
+
+res <- read.csv("T1D_n56/all_results.tsv", sep="\t")
+res <- res %>% filter(metadata == "Disease")
+head(res)
+
+write.table(res, paste0(path, "Results/T1D_n56.txt"), col.names=T, row.names=F)
+```
+
+
+Make correlation:
+```{r}
+
+#CD-UC:
+res1 <- read.csv(paste0(path, "Results/CD_n185.txt"), sep=" ") %>% mutate(t=coef/stderr) %>% arrange(feature)
+res2 <- read.csv(paste0(path, "Results/UC_n185.txt"), sep=" ") %>% mutate(t=coef/stderr) %>% arrange(feature)
+t <- cor.test(res1$t, res2$t, method = "pearson", alternative = "two.sided")
+
+cor_df <- data.frame(disease1="CD", disease2="UC", cor=t$estimate, ci1=t$conf.int[1], ci2=t$conf.int[2], p=t$p.value, n=185)
+
+#CeD:
+res1 <- read.csv(paste0(path, "Results/CD_n30_2.txt"), sep=" ") %>% mutate(t1=coef/stderr) %>% arrange(feature)
+res2 <- read.csv(paste0(path, "Results/CeD_n30_2.txt"), sep=" ") %>% mutate(t2=coef/stderr) %>% arrange(feature)
+res <- merge(res1, res2, by.x="feature", by.y="feature")
+t <- cor.test(res$t1, res$t2, method = "pearson", alternative = "two.sided")
+
+cor_df <- rbind(cor_df, data.frame(disease1="CD", disease2="CeD", cor=t$estimate, ci1=t$conf.int[1], ci2=t$conf.int[2], p=t$p.value, n=30))
+
+res1 <- read.csv(paste0(path, "Results/UC_n30_2.txt"), sep=" ") %>% mutate(t1=coef/stderr) %>% arrange(feature)
+res <- merge(res1, res2, by.x="feature", by.y="feature")
+t <- cor.test(res$t1, res$t2, method = "pearson", alternative = "two.sided")
+
+cor_df <- rbind(cor_df, data.frame(disease1="UC", disease2="CeD", cor=t$estimate, ci1=t$conf.int[1], ci2=t$conf.int[2], p=t$p.value, n=30))
+
+#GD:
+res1 <- read.csv(paste0(path, "Results/CD_n100.txt"), sep=" ") %>% mutate(t1=coef/stderr) %>% arrange(feature)
+res2 <- read.csv(paste0(path, "Results/GD_n100.txt"), sep=" ") %>% mutate(t2=coef/stderr) %>% arrange(feature)
+res <- merge(res1, res2, by.x="feature", by.y="feature")
+t <- cor.test(res$t1, res$t2, method = "pearson", alternative = "two.sided")
+
+cor_df <- rbind(cor_df, data.frame(disease1="CD", disease2="GD", cor=t$estimate, ci1=t$conf.int[1], ci2=t$conf.int[2], p=t$p.value, n=100))
+
+res1 <- read.csv(paste0(path, "Results/UC_n100.txt"), sep=" ") %>% mutate(t1=coef/stderr) %>% arrange(feature)
+res <- merge(res1, res2, by.x="feature", by.y="feature")
+t <- cor.test(res$t1, res$t2, method = "pearson", alternative = "two.sided")
+
+cor_df <- rbind(cor_df, data.frame(disease1="UC", disease2="GD", cor=t$estimate, ci1=t$conf.int[1], ci2=t$conf.int[2], p=t$p.value, n=100))
+
+#MG:
+res1 <- read.csv(paste0(path, "Results/CD_n86.txt"), sep=" ") %>% mutate(t1=coef/stderr) %>% arrange(feature)
+res2 <- read.csv(paste0(path, "Results/MG_n86.txt"), sep=" ") %>% mutate(t2=coef/stderr) %>% arrange(feature)
+res <- merge(res1, res2, by.x="feature", by.y="feature")
+t <- cor.test(res$t1, res$t2, method = "pearson", alternative = "two.sided")
+
+cor_df <- rbind(cor_df, data.frame(disease1="CD", disease2="MG", cor=t$estimate, ci1=t$conf.int[1], ci2=t$conf.int[2], p=t$p.value, n=86))
+
+res1 <- read.csv(paste0(path, "Results/UC_n86.txt"), sep=" ") %>% mutate(t1=coef/stderr) %>% arrange(feature)
+res <- merge(res1, res2, by.x="feature", by.y="feature")
+t <- cor.test(res$t1, res$t2, method = "pearson", alternative = "two.sided")
+
+cor_df <- rbind(cor_df, data.frame(disease1="UC", disease2="MG", cor=t$estimate, ci1=t$conf.int[1], ci2=t$conf.int[2], p=t$p.value, n=86))
+
+#MS:
+res1 <- read.csv(paste0(path, "Results/CD_n47.txt"), sep=" ") %>% mutate(t1=coef/stderr) %>% arrange(feature)
+res2 <- read.csv(paste0(path, "Results/MS_n47.txt"), sep=" ") %>% mutate(t2=coef/stderr) %>% arrange(feature)
+res <- merge(res1, res2, by.x="feature", by.y="feature")
+t <- cor.test(res$t1, res$t2, method = "pearson", alternative = "two.sided")
+
+cor_df <- rbind(cor_df, data.frame(disease1="CD", disease2="MS", cor=t$estimate, ci1=t$conf.int[1], ci2=t$conf.int[2], p=t$p.value, n=47))
+
+res1 <- read.csv(paste0(path, "Results/UC_n47.txt"), sep=" ") %>% mutate(t1=coef/stderr) %>% arrange(feature)
+res <- merge(res1, res2, by.x="feature", by.y="feature")
+t <- cor.test(res$t1, res$t2, method = "pearson", alternative = "two.sided")
+
+cor_df <- rbind(cor_df, data.frame(disease1="UC", disease2="MS", cor=t$estimate, ci1=t$conf.int[1], ci2=t$conf.int[2], p=t$p.value, n=47))
+
+#Ps:
+res1 <- read.csv(paste0(path, "Results/CD_n67.txt"), sep=" ") %>% mutate(t1=coef/stderr) %>% arrange(feature)
+res2 <- read.csv(paste0(path, "Results/Ps_n67.txt"), sep=" ") %>% mutate(t2=coef/stderr) %>% arrange(feature)
+res <- merge(res1, res2, by.x="feature", by.y="feature")
+t <- cor.test(res$t1, res$t2, method = "pearson", alternative = "two.sided")
+
+cor_df <- rbind(cor_df, data.frame(disease1="CD", disease2="Ps", cor=t$estimate, ci1=t$conf.int[1], ci2=t$conf.int[2], p=t$p.value, n=67))
+
+res1 <- read.csv(paste0(path, "Results/UC_n67.txt"), sep=" ") %>% mutate(t1=coef/stderr) %>% arrange(feature)
+res <- merge(res1, res2, by.x="feature", by.y="feature")
+t <- cor.test(res$t1, res$t2, method = "pearson", alternative = "two.sided")
+
+cor_df <- rbind(cor_df, data.frame(disease1="UC", disease2="Ps", cor=t$estimate, ci1=t$conf.int[1], ci2=t$conf.int[2], p=t$p.value, n=67))
+
+#RA:
+res1 <- read.csv(paste0(path, "Results/CD_n121.txt"), sep=" ") %>% mutate(t=coef/stderr) %>% arrange(feature)
+res2 <- read.csv(paste0(path, "Results/RA_n121.txt"), sep=" ") %>% mutate(t=coef/stderr) %>% arrange(feature)
+t <- cor.test(res1$t, res2$t, method = "pearson", alternative = "two.sided")
+
+cor_df <- rbind(cor_df, data.frame(disease1="CD", disease2="RA", cor=t$estimate, ci1=t$conf.int[1], ci2=t$conf.int[2], p=t$p.value, n=121))
+
+res1 <- read.csv(paste0(path, "Results/UC_n121.txt"), sep=" ") %>% mutate(t=coef/stderr) %>% arrange(feature)
+t <- cor.test(res1$t, res2$t, method = "pearson", alternative = "two.sided")
+
+cor_df <- rbind(cor_df, data.frame(disease1="UC", disease2="RA", cor=t$estimate, ci1=t$conf.int[1], ci2=t$conf.int[2], p=t$p.value, n=121))
+
+#SLE:
+res1 <- read.csv(paste0(path, "Results/CD_n42.txt"), sep=" ") %>% mutate(t1=coef/stderr) %>% arrange(feature)
+res2 <- read.csv(paste0(path, "Results/SLE_n42.txt"), sep=" ") %>% mutate(t2=coef/stderr) %>% arrange(feature)
+res <- merge(res1, res2, by.x="feature", by.y="feature")
+t <- cor.test(res$t1, res$t2, method = "pearson", alternative = "two.sided")
+
+cor_df <- rbind(cor_df, data.frame(disease1="CD", disease2="SLE", cor=t$estimate, ci1=t$conf.int[1], ci2=t$conf.int[2], p=t$p.value, n=42))
+
+res1 <- read.csv(paste0(path, "Results/UC_n42.txt"), sep=" ") %>% mutate(t1=coef/stderr) %>% arrange(feature)
+res <- merge(res1, res2, by.x="feature", by.y="feature")
+t <- cor.test(res$t1, res$t2, method = "pearson", alternative = "two.sided")
+
+cor_df <- rbind(cor_df, data.frame(disease1="UC", disease2="SLE", cor=t$estimate, ci1=t$conf.int[1], ci2=t$conf.int[2], p=t$p.value, n=42))
+
+#T1D:
+res1 <- read.csv(paste0(path, "Results/CD_n56.txt"), sep=" ") %>% mutate(t1=coef/stderr) %>% arrange(feature)
+res2 <- read.csv(paste0(path, "Results/T1D_n56.txt"), sep=" ") %>% mutate(t2=coef/stderr) %>% arrange(feature)
+res <- merge(res1, res2, by.x="feature", by.y="feature")
+t <- cor.test(res$t1, res$t2, method = "pearson", alternative = "two.sided")
+
+cor_df <- rbind(cor_df, data.frame(disease1="CD", disease2="T1D", cor=t$estimate, ci1=t$conf.int[1], ci2=t$conf.int[2], p=t$p.value, n=56))
+
+res1 <- read.csv(paste0(path, "Results/UC_n56.txt"), sep=" ") %>% mutate(t1=coef/stderr) %>% arrange(feature)
+res <- merge(res1, res2, by.x="feature", by.y="feature")
+t <- cor.test(res$t1, res$t2, method = "pearson", alternative = "two.sided")
+
+cor_df <- rbind(cor_df, data.frame(disease1="UC", disease2="T1D", cor=t$estimate, ci1=t$conf.int[1], ci2=t$conf.int[2], p=t$p.value, n=56))
+
+
+write.table(cor_df, paste0(path, "Results/Correlation_16S_new_sens.txt"), sep="\t", quote=F, row.names = F, col.names = T)
+
+```
+
+Correlation analysis:
+```{r}
+
+df_plot <- read.csv(paste0(path, "Results/Correlation_16S_new_sens.txt"), sep="\t")
+
+df_plot$p_adj <- p.adjust(df_plot$p, method = "BH")
+
+#update naming:
+df_plot <- df_plot %>% mutate(disease_full = ifelse(disease2=="CeD", "Celiac disease", ifelse(disease2=="GD", "Graves' disease", ifelse(disease2=="MS", "Multiple sclerosis", ifelse(disease2=="Ps", "Psoriasis", ifelse(disease2=="RA", "Rheumatoid arthritis", ifelse(disease2=="MG", "Myasthenia gravis", ifelse(disease2=="SLE", "Systemic lupus erythematosus", ifelse(disease2=="T1D", "Type 1 diabetes", "Ulcerative colitis")))))))))
+
+disease_order <- c("Ulcerative colitis", "Graves' disease", "Type 1 diabetes", "Multiple sclerosis", "Myasthenia gravis", "Celiac disease", "Psoriasis", "Rheumatoid arthritis", "Systemic lupus erythematosus")
+
+df_plot$disease_full <- factor(df_plot$disease_full, level=disease_order)
+df_plot <- df_plot %>% arrange(disease_full, disease1)
+
+df_plot$plot.column <- "                                         "
+df_plot$"ρ [95% CI]" <- paste0(formatC(df_plot$cor, 2, format = "f"), " [", formatC(df_plot$ci1, 2, format = "f"), "-", formatC(df_plot$ci2, 2, format = "f"), "]")
+
+df_plot$P <- ifelse(df_plot$p_adj<0.01, formatC(df_plot$p_adj, format="e", digits=2), formatC(df_plot$p_adj, format="f", digits=3))
+df_plot$P  <- gsub("e", "%*%10^", df_plot$P)
+
+dt_fig <- df_plot %>% mutate(disease_full=as.character(disease_full)) %>% select(disease_full, disease1, n, plot.column, "ρ [95% CI]", P)  %>% rename("  " = disease1, " " = plot.column, Disease=disease_full, "P adjusted"=P, N=n)
+dt_fig[c(seq(3,17,2)),1] <- ""
+
+
+parse_mat <- matrix(FALSE, 
+                    nrow = nrow(df_plot),
+                    ncol = 6)
+parse_mat[,6] <- TRUE 
+
+fig1 <- forest(data=dt_fig, est=df_plot$cor, lower=df_plot$ci1, upper=df_plot$ci2, ci_column = 4, sizes=0.5, theme=forest_theme(base_size = 8, base_family = "sans", core=list(fg_params = list(parse=parse_mat))), xlab="ρ [95% CI]", xlim=c(-1,1))
+
+fig1 <- edit_plot(fig1, 
+               row = c(1,seq(2,17,2)), col=4,
+               which = c("ci"), 
+               gp = gpar(col = cd2_col))
+
+fig1 <- edit_plot(fig1, 
+               row = c(seq(3,17,2)), col=4,
+               which = c("ci"), 
+               gp = gpar(col = uc2_col))
+
+fig1 <- edit_plot(fig1, 
+               row = c(1,4,5,8,9,12,13,16,17), 
+               which = "background", 
+               gp = gpar(fill = predict_col[13]))
+
+fig1 <- edit_plot(fig1, 
+               row = c(2,3,6,7,10,11,14,15), 
+               which = "background", 
+               gp = gpar(fill = predict_col[12], alpha=0.5))
+
+
+ggsave(fig1, file = paste0(path, "/Illustrations/Microbiota_correlation_sens.tiff"), width = 150, height = 120, units = "mm", dpi = 300, bg="white")
+
+```

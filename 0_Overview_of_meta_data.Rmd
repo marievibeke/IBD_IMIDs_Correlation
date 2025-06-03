@@ -1,0 +1,107 @@
+---
+title: "Inital overview of samples"
+output:
+  github_document:
+    toc: true
+editor_options:
+  chunk_output_type: console
+---
+
+## Load packages
+```{r message=FALSE, warning=FALSE, error=TRUE}
+library(dplyr)
+library(tidyverse)
+library(ggplot2)
+library(ggpubr)
+library(readxl)
+
+path <- "C:/Users/FX76TZ/OneDrive - Aalborg Universitet/Disease correlations/"
+```
+
+Load in meta data:
+```{r}
+df <- read_excel(paste0(path, "Data/meta_data.xlsx"))
+head(df)
+dim(df)[1] #4409
+length(unique(df$BioProject)) #65
+```
+
+Look into diseases. Select only disease with >50 samples:
+```{r}
+table(df$Disease, useNA="always")
+df <- df %>% filter(!is.na(Disease)) #4408
+  
+#Recode Celiac to CeD. Recode psoriasis to Psoriasis
+df <- df %>% mutate(Disease = ifelse(Disease == "Celiac", "CeD", ifelse(Disease== "psoriasis", "Psoriasis", Disease)))
+table(df$Disease)
+
+#Remove BD (Behcets Disease), HH (Hashimoto's hypothyrodism) and NO (Neuromyelitis Optica) due to <50 samples: -> AND none of them have sex and age information
+df_sub <- df %>% filter(Disease %in% c("BD", "HH", "NO"))
+table(df %>% filter(BioProject %in% df_sub$BioProject)%>% select(Disease)) #No other diseases in the project - remove the projects
+df <- df %>% filter(!(BioProject %in% df_sub$BioProject))
+table(df$Disease)
+dim(df)[1] #4312
+length(unique(df$BioProject)) #62
+length(unique(df$Disease)) #12
+
+```
+
+
+Investigate sex and age:
+```{r}
+#Sex
+table(df$sex, useNA = "always")
+df <- df %>% mutate(sex=ifelse(sex=="Female", "female", ifelse(sex=="Male", "male", ifelse(sex=="NA", NA, sex))))
+table(df$sex, useNA = "always")
+
+#Age
+df$Age <- as.numeric(df$age)
+summary(df$Age)
+df %>% filter(Age<2)
+df <- df %>% filter(is.na(Age)|Age>2)
+df <- df %>% select(-age)
+
+#Samples with age and sex information
+df_sub <- df %>% filter(!is.na(Age) & !is.na(sex))
+table(df_sub$Disease)
+```
+
+
+Investigate covariates:
+```{r}
+#Country
+table(df$geo_loc_name_country, useNA = "always")
+df <- df %>% mutate(Country = gsub("SPPA - ", "", geo_loc_name_country))
+table(df$Country)
+length(unique(df$Country)) #24
+
+#Continent
+table(df$geo_loc_name_country_continent, useNA = "always")
+
+#Rename
+df <- df %>% rename(Continent =geo_loc_name_country_continent) %>% select(-geo_loc_name_country, -geo_loc_name)
+head(df)
+length(unique(df$Continent)) #5
+```
+
+Save meta data:
+```{r}
+write.table(df, paste0(path, "Data/meta_data_prepared.txt"), quote=F, row.names = F, sep="\t")
+```
+
+
+Code generation for microbiota sample download:
+```{r}
+df <- read.csv(paste0(path, "Data/meta_data_prepared.txt"), sep="\t")
+
+projects <- unique(df$BioProject)
+setdiff(projects, old_projects)
+
+df_sub <- df %>% filter(BioProject=="PRJNA493726")
+t <- ""
+for (i in 1:dim(df_sub)[1]){
+  t <- paste0(t, df_sub[i, "Run"], " ")
+}
+t
+```
+
